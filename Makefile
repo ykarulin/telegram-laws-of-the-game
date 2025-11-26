@@ -54,13 +54,13 @@ help:
 
 install:
 	python3 -m venv venv
-	source venv/bin/activate && pip install -r requirements.txt
+	bash -c 'source venv/bin/activate && pip install -r requirements.txt'
 
 test:
-	source venv/bin/activate && python -m pytest tests/ -v
+	bash -c 'source venv/bin/activate && python -m pytest tests/ -v'
 
 test-cov:
-	source venv/bin/activate && python -m pytest tests/ -v --cov=. --cov-report=html --cov-report=term-missing
+	bash -c 'source venv/bin/activate && python -m pytest tests/ -v --cov=. --cov-report=html --cov-report=term-missing'
 
 run:
 	bash -c 'source venv/bin/activate && ENVIRONMENT=development python -m src.main'
