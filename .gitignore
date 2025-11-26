@@ -37,3 +37,6 @@ wheels/
 .coverage
 .coverage.*
 htmlcov/
+
+# Document sync state (runtime artifacts)
+knowledgebase/.sync_state.*.json
