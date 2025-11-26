@@ -1,0 +1,20 @@
+# Document folder structure:
+# - upload/     - New documents to be indexed
+# - indexed/    - Successfully indexed documents (reference)
+# - archive/    - Old/deprecated documents
+
+# PDF files
+*.pdf
+
+# Text files
+*.txt
+
+# Markdown
+*.md
+
+# Microsoft Office
+*.docx
+*.doc
+
+# Keep folder structure in git
+!.gitkeep

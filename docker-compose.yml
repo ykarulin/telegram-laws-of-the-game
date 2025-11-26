@@ -1,0 +1,33 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: law-of-the-game-db
+    environment:
+      POSTGRES_USER: telegram_bot
+      POSTGRES_PASSWORD: telegram_bot_password
+      POSTGRES_DB: telegram_bot_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U telegram_bot"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: law-of-the-game-qdrant
+    ports:
+      - "6333:6333"
+      - "6334:6334"  # Optional: REST API also available here
+    volumes:
+      - qdrant_data:/qdrant/storage
+    environment:
+      # Qdrant configuration (optional)
+      QDRANT_TELEMETRY_DISABLED: "false"
+
+volumes:
+  postgres_data:
+  qdrant_data:
