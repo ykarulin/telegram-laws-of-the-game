@@ -32,3 +32,8 @@ wheels/
 *.swo
 *~
 .DS_Store
+
+# Code coverage (build artifacts)
+.coverage
+.coverage.*
+htmlcov/
