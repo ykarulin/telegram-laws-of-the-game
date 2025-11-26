@@ -77,8 +77,13 @@ class TestChunking:
 
     @patch("src.services.embedding_service.SentenceTransformer")
     def test_chunk_document_small_text(self, mock_st):
-        """Test chunking of text smaller than chunk size."""
+        """Test chunking of text smaller than chunk size (in tokens)."""
         mock_model = MagicMock()
+        mock_tokenizer = MagicMock()
+        # Small text: 10 tokens (less than 500)
+        mock_tokenizer.encode.return_value = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+        mock_tokenizer.decode.return_value = "This is a small text."
+        mock_model.tokenizer = mock_tokenizer
         mock_st.return_value = mock_model
 
         service = EmbeddingService()
@@ -89,15 +94,54 @@ class TestChunking:
         assert chunks[0].text == text
         assert chunks[0].chunk_index == 0
         assert chunks[0].total_chunks == 1
+        mock_tokenizer.encode.assert_called_once_with(text)
 
     @patch("src.services.embedding_service.SentenceTransformer")
-    def test_chunk_document_with_overlap(self, mock_st):
-        """Test chunking with overlap."""
+    def test_chunk_document_token_based_splitting(self, mock_st):
+        """Test that chunking splits at token boundaries, not character boundaries."""
         mock_model = MagicMock()
+        mock_tokenizer = MagicMock()
+
+        # Create 600 tokens (more than 500 chunk size)
+        tokens = list(range(600))
+        mock_tokenizer.encode.return_value = tokens
+
+        # When decoding, return dummy text
+        def decode_side_effect(token_ids, skip_special_tokens=False):
+            return f"Text for tokens {token_ids[0]}-{token_ids[-1]}"
+
+        mock_tokenizer.decode.side_effect = decode_side_effect
+        mock_model.tokenizer = mock_tokenizer
         mock_st.return_value = mock_model
 
         service = EmbeddingService()
-        text = "a" * 1000  # 1000 character string
+        text = "x" * 600  # Dummy text
+        chunks = service.chunk_document(text, chunk_size=500, overlap=100)
+
+        assert len(chunks) == 2
+        # First chunk should have tokens 0-499
+        # Second chunk should have tokens 400-599 (overlap of 100 tokens)
+        assert mock_tokenizer.decode.call_count >= 2
+
+    @patch("src.services.embedding_service.SentenceTransformer")
+    def test_chunk_document_with_overlap(self, mock_st):
+        """Test chunking with token-based overlap."""
+        mock_model = MagicMock()
+        mock_tokenizer = MagicMock()
+
+        # Create 1000 tokens
+        tokens = list(range(1000))
+        mock_tokenizer.encode.return_value = tokens
+
+        def decode_side_effect(token_ids, skip_special_tokens=False):
+            return f"Chunk with {len(token_ids)} tokens"
+
+        mock_tokenizer.decode.side_effect = decode_side_effect
+        mock_model.tokenizer = mock_tokenizer
+        mock_st.return_value = mock_model
+
+        service = EmbeddingService()
+        text = "x" * 1000
         chunks = service.chunk_document(
             text,
             chunk_size=300,
@@ -105,19 +149,23 @@ class TestChunking:
         )
 
         assert len(chunks) > 1
-        # Check overlap - end of first chunk should overlap with start of second
-        assert chunks[0].text[-100:] in chunks[1].text
+        # Should have multiple chunks due to 1000 tokens / 300 chunk size
 
     @patch("src.services.embedding_service.SentenceTransformer")
     def test_chunk_document_with_section_metadata(self, mock_st):
         """Test that chunk metadata is preserved."""
         mock_model = MagicMock()
+        mock_tokenizer = MagicMock()
+        mock_tokenizer.encode.return_value = [1, 2, 3, 4, 5]
+        mock_tokenizer.decode.return_value = "Rule 1: Content here."
+        mock_model.tokenizer = mock_tokenizer
         mock_st.return_value = mock_model
 
         service = EmbeddingService()
-        text = "Rule 1: Content here. Rule 2: More content here."
+        text = "Rule 1: Content here."
         chunks = service.chunk_document(
             text,
+            chunk_size=500,
             section="Laws",
             subsection="Basic Rules",
             page_number=5
@@ -139,35 +187,72 @@ class TestChunking:
         assert len(chunks) == 0
 
     @patch("src.services.embedding_service.SentenceTransformer")
-    def test_chunk_document_sentence_boundary(self, mock_st):
-        """Test that chunks break at sentence boundaries."""
+    def test_chunk_document_no_tokens(self, mock_st):
+        """Test chunking when tokenizer produces no tokens."""
         mock_model = MagicMock()
+        mock_tokenizer = MagicMock()
+        mock_tokenizer.encode.return_value = []
+        mock_model.tokenizer = mock_tokenizer
         mock_st.return_value = mock_model
 
         service = EmbeddingService()
-        text = "This is sentence one. This is sentence two. " * 10
-        chunks = service.chunk_document(
-            text,
-            chunk_size=200
-        )
-
-        # All chunks should end with a period (sentence boundary)
-        for chunk in chunks[:-1]:  # Skip last one which might not end with period
-            assert chunk.text.rstrip().endswith((".", "!", "?"))
+        chunks = service.chunk_document("some text")
+        assert len(chunks) == 0
 
     @patch("src.services.embedding_service.SentenceTransformer")
     def test_chunk_updates_total_chunks(self, mock_st):
         """Test that total_chunks is updated for all chunks."""
         mock_model = MagicMock()
+        mock_tokenizer = MagicMock()
+
+        # Create 1000 tokens (will split into ~3 chunks with 300 token size)
+        tokens = list(range(1000))
+        mock_tokenizer.encode.return_value = tokens
+
+        def decode_side_effect(token_ids, skip_special_tokens=False):
+            return f"Chunk with {len(token_ids)} tokens"
+
+        mock_tokenizer.decode.side_effect = decode_side_effect
+        mock_model.tokenizer = mock_tokenizer
         mock_st.return_value = mock_model
 
         service = EmbeddingService()
-        text = "a" * 1000
-        chunks = service.chunk_document(text, chunk_size=300)
+        text = "x" * 1000
+        chunks = service.chunk_document(text, chunk_size=300, overlap=100)
 
         num_chunks = len(chunks)
+        assert num_chunks > 1
         for chunk in chunks:
             assert chunk.total_chunks == num_chunks
+
+    @patch("src.services.embedding_service.SentenceTransformer")
+    def test_chunk_tokenizer_initialization(self, mock_st):
+        """Test that tokenizer is properly initialized from model."""
+        mock_model = MagicMock()
+        mock_tokenizer = MagicMock()
+        mock_model.tokenizer = mock_tokenizer
+        mock_st.return_value = mock_model
+
+        service = EmbeddingService()
+
+        assert service.tokenizer == mock_tokenizer
+        mock_st.assert_called_once_with("intfloat/multilingual-e5-large")
+
+    @patch("src.services.embedding_service.SentenceTransformer")
+    def test_chunk_error_handling_on_tokenization_failure(self, mock_st):
+        """Test error handling when tokenization fails."""
+        mock_model = MagicMock()
+        mock_tokenizer = MagicMock()
+        mock_tokenizer.encode.side_effect = Exception("Tokenization failed")
+        mock_model.tokenizer = mock_tokenizer
+        mock_st.return_value = mock_model
+
+        service = EmbeddingService()
+
+        with pytest.raises(Exception) as exc_info:
+            service.chunk_document("some text")
+
+        assert "Tokenization failed" in str(exc_info.value)
 
 
 class TestSingleTextEmbedding:

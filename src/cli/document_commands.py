@@ -306,8 +306,8 @@ class DocumentCLI:
             print("Chunking document...")
             chunks = self.embedding_service.chunk_document(
                 text=doc.content,
-                chunk_size=500,
-                overlap=100,
+                chunk_size=500,  # tokens (from embedding model's tokenizer)
+                overlap=100,     # tokens (from embedding model's tokenizer)
                 section=doc.document_type,
             )
             print(f"✓ Created {len(chunks)} chunks")

@@ -9,8 +9,8 @@ class TelegramLimits:
 
 class EmbeddingConfig:
     """Embedding service defaults and limits."""
-    DEFAULT_CHUNK_SIZE = 500
-    DEFAULT_CHUNK_OVERLAP = 100
+    DEFAULT_CHUNK_SIZE = 500  # Size in tokens (from embedding model's tokenizer)
+    DEFAULT_CHUNK_OVERLAP = 100  # Overlap in tokens (from embedding model's tokenizer)
     VECTOR_DIMENSIONS_E5_LARGE = 1024  # multilingual-e5-large
     VECTOR_DIMENSIONS_SMALL = 512  # text-embedding-3-small
     VECTOR_DIMENSIONS_LARGE = 3072  # text-embedding-3-large

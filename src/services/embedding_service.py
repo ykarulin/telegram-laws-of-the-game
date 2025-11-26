@@ -98,6 +98,7 @@ class EmbeddingService:
             # Load model from Hugging Face (cached after first download)
             logger.info(f"Loading embedding model: {model}")
             self.model = SentenceTransformer(model)
+            self.tokenizer = self.model.tokenizer
             self.vector_size = self._get_vector_size(model)
             logger.info(f"Loaded {model} with {self.vector_size} dimensions")
         except Exception as e:
@@ -126,15 +127,16 @@ class EmbeddingService:
         page_number: Optional[int] = None,
     ) -> List[Chunk]:
         """
-        Split document into overlapping chunks.
+        Split document into overlapping chunks based on tokens.
 
-        Uses character-based chunking with overlap to preserve context
-        across chunk boundaries.
+        Uses token-based chunking with overlap to preserve context across chunk
+        boundaries. Tokens are from the embedding model's tokenizer for consistency
+        with how text is actually encoded into vectors.
 
         Args:
             text: Document text to chunk
-            chunk_size: Target chunk size in characters (default: 500)
-            overlap: Overlap between consecutive chunks in characters (default: 100)
+            chunk_size: Target chunk size in tokens (default: 500)
+            overlap: Overlap between consecutive chunks in tokens (default: 100)
             section: Document section name (for metadata)
             subsection: Document subsection name (for metadata)
             page_number: Page number (for metadata)
@@ -143,7 +145,7 @@ class EmbeddingService:
             List of Chunk objects
 
         Examples:
-            >>> chunks = service.chunk_document("Long text...", chunk_size=500)
+            >>> chunks = service.chunk_document("Long text...", chunk_size=500, overlap=100)
             >>> len(chunks)
             3
             >>> chunks[0].text[:50]
@@ -156,67 +158,73 @@ class EmbeddingService:
         chunks = []
         text = text.strip()
 
-        # If text is smaller than chunk size, return single chunk
-        if len(text) <= chunk_size:
-            return [
-                Chunk(
-                    text=text,
-                    section=section,
-                    subsection=subsection,
-                    page_number=page_number,
-                    chunk_index=0,
-                    total_chunks=1,
-                )
-            ]
+        try:
+            # Tokenize the entire text
+            token_ids = self.tokenizer.encode(text)
 
-        # Create overlapping chunks
-        start = 0
-        chunk_index = 0
+            if not token_ids:
+                logger.warning("Text produced no tokens after tokenization")
+                return []
 
-        while start < len(text):
-            # Get chunk end position
-            end = min(start + chunk_size, len(text))
-
-            # If not at end of text, try to break at sentence boundary
-            if end < len(text):
-                # Look backward for a sentence boundary (. ! ?)
-                last_sentence = max(
-                    text.rfind(".", start, end),
-                    text.rfind("!", start, end),
-                    text.rfind("?", start, end),
-                )
-                if last_sentence > start + chunk_size // 2:
-                    end = last_sentence + 1
-
-            # Extract chunk
-            chunk_text = text[start:end].strip()
-
-            if chunk_text:  # Only add non-empty chunks
-                chunks.append(
+            # If text is smaller than chunk size (in tokens), return single chunk
+            if len(token_ids) <= chunk_size:
+                return [
                     Chunk(
-                        text=chunk_text,
+                        text=text,
                         section=section,
                         subsection=subsection,
                         page_number=page_number,
-                        chunk_index=chunk_index,
-                        total_chunks=0,  # Will update after loop
+                        chunk_index=0,
+                        total_chunks=1,
                     )
-                )
-                chunk_index += 1
+                ]
 
-            # Move to next chunk (with overlap)
-            start = end - overlap if end < len(text) else len(text)
+            # Create overlapping chunks based on token boundaries
+            start_token = 0
+            chunk_index = 0
 
-        # Update total_chunks count
-        for chunk in chunks:
-            chunk.total_chunks = len(chunks)
+            while start_token < len(token_ids):
+                # Get chunk end position (in tokens)
+                end_token = min(start_token + chunk_size, len(token_ids))
 
-        logger.info(
-            f"Chunked document into {len(chunks)} chunks "
-            f"(size={chunk_size}, overlap={overlap})"
-        )
+                # Decode tokens back to text
+                chunk_token_ids = token_ids[start_token:end_token]
+                chunk_text = self.tokenizer.decode(
+                    chunk_token_ids,
+                    skip_special_tokens=True
+                ).strip()
 
-        return chunks
+                if chunk_text:  # Only add non-empty chunks
+                    chunks.append(
+                        Chunk(
+                            text=chunk_text,
+                            section=section,
+                            subsection=subsection,
+                            page_number=page_number,
+                            chunk_index=chunk_index,
+                            total_chunks=0,  # Will update after loop
+                        )
+                    )
+                    chunk_index += 1
+
+                # Move to next chunk (with overlap in tokens)
+                start_token = end_token - overlap if end_token < len(token_ids) else len(token_ids)
+
+            # Update total_chunks count
+            for chunk in chunks:
+                chunk.total_chunks = len(chunks)
+
+            logger.info(
+                f"Chunked document into {len(chunks)} chunks "
+                f"(size={chunk_size} tokens, overlap={overlap} tokens, "
+                f"total_tokens={len(token_ids)})"
+            )
+
+            return chunks
+
+        except Exception as e:
+            logger.error(f"Failed to chunk document: {e}")
+            raise
 
     def embed_text(self, text: str) -> Optional[List[float]]:
         """
