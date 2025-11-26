@@ -1,7 +1,8 @@
 """Tests for LLM integration module."""
 import pytest
 from unittest.mock import MagicMock, patch
-from src.core.llm import LLMClient, TELEGRAM_MESSAGE_LIMIT, SYSTEM_PROMPT
+from src.core.llm import LLMClient, SYSTEM_PROMPT, get_system_prompt
+from src.constants import TelegramLimits
 from src.exceptions import LLMError
 
 
@@ -40,7 +41,7 @@ class TestLLMClient:
 
     def test_generate_response_truncates_to_telegram_limit(self):
         """Test response truncation to Telegram message limit."""
-        long_response = "x" * (TELEGRAM_MESSAGE_LIMIT + 100)
+        long_response = "x" * (TelegramLimits.MAX_MESSAGE_LENGTH + 100)
         mock_client = MagicMock()
         mock_response = MagicMock()
         mock_response.choices[0].message.content = long_response
@@ -54,7 +55,7 @@ class TestLLMClient:
 
             response = client.generate_response("Test")
 
-            assert len(response) <= TELEGRAM_MESSAGE_LIMIT
+            assert len(response) <= TelegramLimits.MAX_MESSAGE_LENGTH
             assert response.endswith("...")
 
     def test_generate_response_with_whitespace(self):
@@ -284,4 +285,4 @@ class TestLLMClient:
 
     def test_telegram_message_limit_is_correct(self):
         """Test that Telegram message limit is set correctly."""
-        assert TELEGRAM_MESSAGE_LIMIT == 4096
+        assert TelegramLimits.MAX_MESSAGE_LENGTH == 4096

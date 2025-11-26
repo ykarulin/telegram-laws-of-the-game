@@ -3,11 +3,9 @@ import logging
 from datetime import datetime, timezone
 from openai import OpenAI, APIError, RateLimitError, APIConnectionError
 from src.exceptions import LLMError
+from src.constants import TelegramLimits
 
 logger = logging.getLogger(__name__)
-
-# Telegram bot API message character limit
-TELEGRAM_MESSAGE_LIMIT = 4096
 
 
 def get_system_prompt() -> str:
@@ -132,11 +130,11 @@ class LLMClient:
             logger.debug(f"Generated response ({len(reply_text)} chars)")
 
             # Truncate to Telegram message limit
-            if len(reply_text) > TELEGRAM_MESSAGE_LIMIT:
+            if len(reply_text) > TelegramLimits.MAX_MESSAGE_LENGTH:
                 logger.warning(
-                    f"Response truncated from {len(reply_text)} to {TELEGRAM_MESSAGE_LIMIT} chars"
+                    f"Response truncated from {len(reply_text)} to {TelegramLimits.MAX_MESSAGE_LENGTH} chars"
                 )
-                reply_text = reply_text[: TELEGRAM_MESSAGE_LIMIT - 3] + "..."
+                reply_text = reply_text[: TelegramLimits.MAX_MESSAGE_LENGTH - 3] + "..."
 
             return reply_text
 

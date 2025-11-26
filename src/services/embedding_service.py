@@ -15,6 +15,7 @@ from dataclasses import dataclass
 
 import openai
 from openai import OpenAI
+from src.constants import EmbeddingConfig
 
 logger = logging.getLogger(__name__)
 
@@ -49,17 +50,17 @@ class EmbeddingService:
     def _get_vector_size(model: str) -> int:
         """Get vector dimension size for model."""
         if "3-small" in model:
-            return 512
+            return EmbeddingConfig.VECTOR_DIMENSIONS_SMALL
         elif "3-large" in model:
-            return 3072
+            return EmbeddingConfig.VECTOR_DIMENSIONS_LARGE
         else:
-            return 1536  # Default for older models
+            return EmbeddingConfig.VECTOR_DIMENSIONS_DEFAULT
 
     def chunk_document(
         self,
         text: str,
-        chunk_size: int = 500,
-        overlap: int = 100,
+        chunk_size: int = EmbeddingConfig.DEFAULT_CHUNK_SIZE,
+        overlap: int = EmbeddingConfig.DEFAULT_CHUNK_OVERLAP,
         section: str = "",
         subsection: str = "",
         page_number: Optional[int] = None,
@@ -182,7 +183,7 @@ class EmbeddingService:
         for attempt in range(retries):
             try:
                 response = self.client.embeddings.create(
-                    input=text, model=self.model, dimensions=512
+                    input=text, model=self.model, dimensions=self.vector_size
                 )
                 embedding = response.data[0].embedding
                 logger.debug(f"Embedded text ({len(text)} chars) → {len(embedding)} dims")
@@ -246,7 +247,7 @@ class EmbeddingService:
             for attempt in range(retries):
                 try:
                     response = self.client.embeddings.create(
-                        input=batch_texts, model=self.model, dimensions=512
+                        input=batch_texts, model=self.model, dimensions=self.vector_size
                     )
 
                     # Extract embeddings in order

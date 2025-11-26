@@ -36,6 +36,38 @@ class Config:
     top_k_retrievals: int
     similarity_threshold: float
 
+    def __post_init__(self) -> None:
+        """Validate configuration values after initialization."""
+        if not 0.0 <= self.openai_temperature <= 2.0:
+            raise ConfigError(
+                f"openai_temperature must be between 0.0 and 2.0, got {self.openai_temperature}"
+            )
+
+        if not 0.0 <= self.similarity_threshold <= 1.0:
+            raise ConfigError(
+                f"similarity_threshold must be between 0.0 and 1.0, got {self.similarity_threshold}"
+            )
+
+        if not 1 <= self.embedding_batch_size <= 2048:
+            raise ConfigError(
+                f"embedding_batch_size must be between 1 and 2048, got {self.embedding_batch_size}"
+            )
+
+        if self.top_k_retrievals < 1:
+            raise ConfigError(
+                f"top_k_retrievals must be at least 1, got {self.top_k_retrievals}"
+            )
+
+        if self.qdrant_port <= 0 or self.qdrant_port > 65535:
+            raise ConfigError(
+                f"qdrant_port must be between 1 and 65535, got {self.qdrant_port}"
+            )
+
+        if self.openai_max_tokens < 1:
+            raise ConfigError(
+                f"openai_max_tokens must be at least 1, got {self.openai_max_tokens}"
+            )
+
     @classmethod
     def from_env(cls) -> "Config":
         """Load configuration from environment variables."""

@@ -12,15 +12,13 @@ from src.services.embedding_service import EmbeddingService
 from src.services.retrieval_service import RetrievalService
 from src.handlers.typing_indicator import send_typing_action_periodically
 from src.exceptions import LLMError
+from src.constants import TelegramLimits
 
 logger = logging.getLogger(__name__)
 
 
 class MessageHandler:
     """Handles incoming Telegram messages and generates responses."""
-
-    # Telegram message character limit
-    TELEGRAM_MAX_MESSAGE_LENGTH = 4096
 
     def __init__(
         self,
@@ -233,12 +231,12 @@ class MessageHandler:
         total_length = len(response) + len(citations_text)
 
         # If within limit, append all citations
-        if total_length <= self.TELEGRAM_MAX_MESSAGE_LENGTH:
+        if total_length <= TelegramLimits.MAX_MESSAGE_LENGTH:
             return response + citations_text
 
         # If over limit, truncate response to make room for citations
         # Leave buffer for citations and ensure we don't cut in middle of sentence
-        available_length = self.TELEGRAM_MAX_MESSAGE_LENGTH - len(citations_text) - 50
+        available_length = TelegramLimits.MAX_MESSAGE_LENGTH - len(citations_text) - TelegramLimits.MESSAGE_LENGTH_BUFFER
 
         if available_length < 100:
             # Even with truncation, can't fit citations reasonably
