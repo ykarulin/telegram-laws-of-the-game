@@ -63,7 +63,7 @@ class VectorDatabase:
         host: str,
         port: int,
         api_key: Optional[str] = None,
-        timeout: float = 30.0,
+        timeout: float = 60.0,
     ):
         """Initialize Qdrant client connection.
 
@@ -71,7 +71,7 @@ class VectorDatabase:
             host: Qdrant server host
             port: Qdrant server port
             api_key: API key for secure instances (optional)
-            timeout: Connection timeout in seconds
+            timeout: Connection timeout in seconds (default 60 for large uploads)
         """
         self.host = host
         self.port = port
@@ -148,22 +148,48 @@ class VectorDatabase:
         self,
         collection_name: str,
         points: List[PointStruct],
+        batch_size: int = 256,
     ) -> bool:
         """Upsert points (vectors with metadata) into a collection.
+
+        Automatically batches large uploads to avoid timeout issues.
+        Large documents are split into batches of 256 points each.
 
         Args:
             collection_name: Target collection name
             points: List of PointStruct objects with vectors and metadata
+            batch_size: Number of points per batch (default 256)
 
         Returns:
             True if successful
         """
         try:
-            self.client.upsert(
-                collection_name=collection_name,
-                points=points,
-            )
-            logger.debug(f"Upserted {len(points)} points to '{collection_name}'")
+            total_points = len(points)
+
+            # If small batch, upload directly
+            if total_points <= batch_size:
+                self.client.upsert(
+                    collection_name=collection_name,
+                    points=points,
+                )
+                logger.debug(f"Upserted {total_points} points to '{collection_name}'")
+                return True
+
+            # For large batches, split into smaller chunks
+            logger.info(f"Uploading {total_points} points in batches of {batch_size}")
+            for i in range(0, total_points, batch_size):
+                batch = points[i : i + batch_size]
+                batch_num = (i // batch_size) + 1
+                total_batches = (total_points + batch_size - 1) // batch_size
+
+                logger.debug(f"Uploading batch {batch_num}/{total_batches} ({len(batch)} points)")
+
+                self.client.upsert(
+                    collection_name=collection_name,
+                    points=batch,
+                )
+
+            logger.info(f"Successfully upserted all {total_points} points to '{collection_name}'")
             return True
         except Exception as e:
             logger.error(f"Failed to upsert points to '{collection_name}': {e}")

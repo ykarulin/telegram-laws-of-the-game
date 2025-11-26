@@ -137,7 +137,7 @@ reset-embeddings-dev:
 	@read -p "Type 'yes' to confirm: " confirm; \
 	if [ "$$confirm" = "yes" ]; then \
 		bash -c 'source venv/bin/activate && set -a && source .env.development && set +a && python -c "from src.cli.document_commands import DocumentCLI; from src.config import Config; cli = DocumentCLI(Config.from_env()); cli.delete_all_documents(force=True); cli.close()"'; \
-		mv knowledgebase/indexed/* knowledgebase/upload/ 2>/dev/null || echo "No indexed files to move"; \
+		find knowledgebase/indexed -type f -not -name ".DS_Store" -not -name ".gitkeep" | xargs -I {} mv {} knowledgebase/upload/ 2>/dev/null || echo "No indexed files to move"; \
 		rm -f knowledgebase/.sync_state.development.json; \
 		echo "✅ Databases cleared and files moved."; \
 		echo "🔄 Re-syncing documents with new embeddings..."; \
@@ -159,7 +159,7 @@ reset-embeddings-testing:
 	@read -p "Type 'yes' to confirm: " confirm; \
 	if [ "$$confirm" = "yes" ]; then \
 		bash -c 'source venv/bin/activate && set -a && source .env.testing && set +a && python -c "from src.cli.document_commands import DocumentCLI; from src.config import Config; cli = DocumentCLI(Config.from_env()); cli.delete_all_documents(force=True); cli.close()"'; \
-		mv knowledgebase/indexed/* knowledgebase/upload/ 2>/dev/null || echo "No indexed files to move"; \
+		find knowledgebase/indexed -type f -not -name ".DS_Store" -not -name ".gitkeep" | xargs -I {} mv {} knowledgebase/upload/ 2>/dev/null || echo "No indexed files to move"; \
 		rm -f knowledgebase/.sync_state.testing.json; \
 		echo "✅ Databases cleared and files moved."; \
 		echo "🔄 Re-syncing documents with new embeddings..."; \
@@ -181,7 +181,7 @@ reset-embeddings-prod:
 	@read -p "Type 'yes-prod' to confirm for PRODUCTION: " confirm; \
 	if [ "$$confirm" = "yes-prod" ]; then \
 		bash -c 'source venv/bin/activate && set -a && source .env.production && set +a && python -c "from src.cli.document_commands import DocumentCLI; from src.config import Config; cli = DocumentCLI(Config.from_env()); cli.delete_all_documents(force=True); cli.close()"'; \
-		mv knowledgebase/indexed/* knowledgebase/upload/ 2>/dev/null || echo "No indexed files to move"; \
+		find knowledgebase/indexed -type f -not -name ".DS_Store" -not -name ".gitkeep" | xargs -I {} mv {} knowledgebase/upload/ 2>/dev/null || echo "No indexed files to move"; \
 		rm -f knowledgebase/.sync_state.production.json; \
 		echo "✅ Databases cleared and files moved."; \
 		echo "🔄 Re-syncing documents with new embeddings..."; \

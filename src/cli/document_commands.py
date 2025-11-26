@@ -480,6 +480,64 @@ class DocumentCLI:
             print(f"❌ Error getting statistics: {e}")
             return False
 
+    def delete_all_documents(self, force: bool = False) -> bool:
+        """Delete all documents from PostgreSQL and clear Qdrant collection.
+
+        This is a destructive operation used for resetting embeddings when changing
+        embedding models. It:
+        1. Deletes all documents from PostgreSQL (soft delete)
+        2. Drops and recreates the Qdrant collection (complete reset)
+        3. Clears the embeddings table
+
+        Args:
+            force: If True, skip confirmation prompt
+
+        Returns:
+            True if successful, False otherwise
+        """
+        try:
+            if not force:
+                print("⚠️  WARNING: This will delete ALL documents and embeddings!")
+                response = input("Type 'yes' to confirm: ").lower()
+                if response != "yes":
+                    print("Cancelled.")
+                    return False
+
+            # Step 1: Get all indexed documents first
+            all_docs = self.doc_service.list_documents()
+            if not all_docs:
+                print("No documents found to delete.")
+                return True
+
+            print(f"Deleting {len(all_docs)} documents...")
+
+            # Step 2: Delete all documents from PostgreSQL (soft delete)
+            deleted_count = 0
+            for doc in all_docs:
+                if self.doc_service.delete_document(doc.id):
+                    deleted_count += 1
+
+            print(f"✓ Marked {deleted_count} documents as deleted in PostgreSQL")
+
+            # Step 3: Delete entire Qdrant collection (complete reset)
+            collection_name = self.config.qdrant_collection_name
+            try:
+                if self.vector_db.collection_exists(collection_name):
+                    self.vector_db.delete_collection(collection_name)
+                    print(f"✓ Deleted Qdrant collection '{collection_name}'")
+                else:
+                    print(f"⚠️  Collection '{collection_name}' does not exist in Qdrant")
+            except Exception as e:
+                print(f"⚠️  Warning: Failed to delete Qdrant collection: {e}")
+                print(f"   Documents are still marked as deleted in PostgreSQL")
+
+            print("✅ All documents and embeddings have been deleted")
+            return True
+
+        except Exception as e:
+            print(f"❌ Error deleting all documents: {e}")
+            return False
+
     def close(self):
         """Close database connection."""
         if self.db_session:
