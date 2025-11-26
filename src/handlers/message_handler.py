@@ -15,6 +15,11 @@ from src.handlers.typing_indicator import send_typing_action_periodically
 from src.models.message_data import MessageData
 from src.exceptions import LLMError
 from src.constants import TelegramLimits
+from src.utils.logging import (
+    debug_log_rag_retrieval,
+    debug_log_llm_context,
+    debug_log_llm_response,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -198,17 +203,7 @@ class MessageHandler:
         Args:
             retrieved_chunks: List of retrieved document chunks
         """
-        if logger.level > logging.DEBUG:
-            return
-
-        logger.debug("📚 RAG RETRIEVAL DETAILS:")
-        for idx, chunk in enumerate(retrieved_chunks, 1):
-            logger.debug(f"  [{idx}] Score: {chunk.score:.3f}")
-            if chunk.metadata:
-                logger.debug(f"      Document: {chunk.metadata.get('document_name', 'N/A')}")
-                logger.debug(f"      Type: {chunk.metadata.get('document_type', 'N/A')}")
-                logger.debug(f"      Section: {chunk.metadata.get('section', 'N/A')}")
-            logger.debug(f"      Preview: {chunk.text[:80]}...")
+        debug_log_rag_retrieval(logger, retrieved_chunks)
 
     async def _generate_response(
         self,
@@ -242,13 +237,13 @@ class MessageHandler:
             logger.debug(f"Augmented context with {len(augmented_context)} items")
 
         # Log what's being sent to LLM
-        if logger.level <= logging.DEBUG:
-            logger.debug("📤 SENDING TO LLM:")
-            logger.debug(f"User query: {user_text}")
-            if retrieved_context:
-                logger.debug(f"RAG context: {len(retrieved_context)} chars from {len(retrieved_chunks)} chunks")
-            if conversation_context:
-                logger.debug(f"Conversation context: {len(conversation_context)} items")
+        debug_log_llm_context(
+            logger,
+            user_text,
+            retrieved_context if retrieved_context else None,
+            len(retrieved_chunks),
+            len(conversation_context) if conversation_context else 0,
+        )
 
         # Run LLM call in executor to keep event loop non-blocking
         loop = asyncio.get_event_loop()
@@ -258,7 +253,7 @@ class MessageHandler:
             user_text,
             augmented_context
         )
-        logger.debug(f"📥 LLM RESPONSE: {len(bot_response)} chars")
+        debug_log_llm_response(logger, len(bot_response))
 
         # Append source citations if documents were retrieved
         if retrieved_chunks:

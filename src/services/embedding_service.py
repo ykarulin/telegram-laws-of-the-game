@@ -30,6 +30,56 @@ class Chunk:
     chunk_index: int = 0
     total_chunks: int = 0
 
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert chunk to dictionary representation.
+
+        Returns:
+            Dictionary with all chunk fields
+        """
+        return {
+            "text": self.text,
+            "section": self.section,
+            "subsection": self.subsection,
+            "page_number": self.page_number,
+            "chunk_index": self.chunk_index,
+            "total_chunks": self.total_chunks,
+        }
+
+    def get_location(self) -> str:
+        """Get human-readable location information.
+
+        Returns:
+            String describing the location in the document (e.g., "Section > Subsection, Page 5")
+        """
+        parts = []
+        if self.section:
+            parts.append(self.section)
+        if self.subsection:
+            parts.append(self.subsection)
+
+        location = " > ".join(parts) if parts else "Unknown section"
+
+        if self.page_number is not None:
+            location += f", Page {self.page_number}"
+
+        return location
+
+    def is_first_chunk(self) -> bool:
+        """Check if this is the first chunk of the document.
+
+        Returns:
+            True if this is chunk 0, False otherwise
+        """
+        return self.chunk_index == 0
+
+    def is_last_chunk(self) -> bool:
+        """Check if this is the last chunk of the document.
+
+        Returns:
+            True if this is the final chunk, False otherwise
+        """
+        return self.chunk_index == self.total_chunks - 1
+
 
 class EmbeddingService:
     """Generate embeddings for document chunks using OpenAI API."""

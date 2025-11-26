@@ -25,6 +25,35 @@ class RetrievedChunk:
     score: float
     metadata: Dict[str, Any]
 
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert chunk to dictionary representation.
+
+        Returns:
+            Dictionary with all chunk fields
+        """
+        return {
+            "chunk_id": self.chunk_id,
+            "text": self.text,
+            "score": self.score,
+            "metadata": self.metadata,
+        }
+
+    def get_source(self) -> str:
+        """Get the source document name from metadata.
+
+        Returns:
+            Source document name, or 'Unknown' if not available
+        """
+        return self.metadata.get("document_name", "Unknown")
+
+    def get_section(self) -> str:
+        """Get the section name from metadata.
+
+        Returns:
+            Section name, or 'Unknown' if not available
+        """
+        return self.metadata.get("section", "Unknown")
+
 
 class VectorDatabase:
     """Qdrant vector database manager for semantic search over documents."""

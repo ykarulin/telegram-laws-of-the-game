@@ -60,6 +60,39 @@ class Message:
             db_id=model.id,
         )
 
+    def is_bot_message(self) -> bool:
+        """Check if this message was sent by the bot.
+
+        Returns:
+            True if sender_type is 'bot', False otherwise
+        """
+        return self.sender_type == "bot"
+
+    def is_user_message(self) -> bool:
+        """Check if this message was sent by a user.
+
+        Returns:
+            True if sender_type is 'user', False otherwise
+        """
+        return self.sender_type == "user"
+
+    def to_dict(self) -> dict:
+        """Convert message to dictionary representation.
+
+        Returns:
+            Dictionary with all message fields
+        """
+        return {
+            "message_id": self.message_id,
+            "chat_id": self.chat_id,
+            "sender_type": self.sender_type,
+            "sender_id": self.sender_id,
+            "text": self.text,
+            "reply_to_message_id": self.reply_to_message_id,
+            "timestamp": self.timestamp.isoformat() if self.timestamp else None,
+            "db_id": self.db_id,
+        }
+
 
 class ConversationDatabase:
     """PostgreSQL database manager using SQLAlchemy."""
@@ -121,6 +154,48 @@ class ConversationDatabase:
         """Cleanup when exiting 'with' block."""
         self.close()
 
+    def _validate_message_id(self, message_id: int) -> None:
+        """Validate message_id parameter.
+
+        Args:
+            message_id: Telegram message ID to validate
+
+        Raises:
+            ValueError: If message_id is invalid (must be > 0)
+        """
+        if not isinstance(message_id, int):
+            raise ValueError(f"message_id must be an integer, got {type(message_id).__name__}")
+        if message_id <= 0:
+            raise ValueError(f"message_id must be positive, got {message_id}")
+
+    def _validate_chat_id(self, chat_id: int) -> None:
+        """Validate chat_id parameter.
+
+        Args:
+            chat_id: Telegram chat ID to validate
+
+        Raises:
+            ValueError: If chat_id is invalid (must be non-zero)
+        """
+        if not isinstance(chat_id, int):
+            raise ValueError(f"chat_id must be an integer, got {type(chat_id).__name__}")
+        if chat_id == 0:
+            raise ValueError("chat_id cannot be zero")
+
+    def _validate_text(self, text: str) -> None:
+        """Validate text parameter.
+
+        Args:
+            text: Message text to validate
+
+        Raises:
+            ValueError: If text is invalid (must be non-empty string)
+        """
+        if not isinstance(text, str):
+            raise ValueError(f"text must be a string, got {type(text).__name__}")
+        if not text or not text.strip():
+            raise ValueError("text cannot be empty or whitespace-only")
+
     def save_message(
         self,
         message_id: int,
@@ -139,7 +214,15 @@ class ConversationDatabase:
             sender_id: User ID (if user) or bot ID (if bot)
             text: Message text
             reply_to_message_id: Telegram message ID this message replies to
+
+        Raises:
+            ValueError: If any parameter fails validation
         """
+        # Validate inputs
+        self._validate_message_id(message_id)
+        self._validate_chat_id(chat_id)
+        self._validate_text(text)
+
         logger.debug(f"Attempting to save {sender_type} message {message_id} in chat {chat_id}")
         try:
             with self.get_session() as session:
@@ -189,7 +272,14 @@ class ConversationDatabase:
 
         Returns:
             Message if found, None otherwise
+
+        Raises:
+            ValueError: If any parameter fails validation
         """
+        # Validate inputs
+        self._validate_message_id(message_id)
+        self._validate_chat_id(chat_id)
+
         try:
             with self.get_session() as session:
                 model = session.query(MessageModel).filter(
@@ -223,7 +313,16 @@ class ConversationDatabase:
 
         Returns:
             List of messages in conversation, ordered chronologically
+
+        Raises:
+            ValueError: If any parameter fails validation
         """
+        # Validate inputs
+        self._validate_message_id(message_id)
+        self._validate_chat_id(chat_id)
+        if not isinstance(user_id, int):
+            raise ValueError(f"user_id must be an integer, got {type(user_id).__name__}")
+
         try:
             with self.get_session() as session:
                 chain = []
@@ -279,7 +378,15 @@ class ConversationDatabase:
 
         Returns:
             List of messages, ordered by timestamp (newest first)
+
+        Raises:
+            ValueError: If any parameter fails validation
         """
+        # Validate inputs
+        self._validate_chat_id(chat_id)
+        if not isinstance(limit, int) or limit < 1:
+            raise ValueError(f"limit must be a positive integer, got {limit}")
+
         try:
             with self.get_session() as session:
                 models = session.query(MessageModel).filter(
