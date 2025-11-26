@@ -12,6 +12,7 @@ from src.core.vector_db import RetrievedChunk
 from src.services.embedding_service import EmbeddingService
 from src.services.retrieval_service import RetrievalService
 from src.handlers.typing_indicator import send_typing_action_periodically
+from src.models.message_data import MessageData
 from src.exceptions import LLMError
 from src.constants import TelegramLimits
 
@@ -46,7 +47,37 @@ class MessageHandler:
         update: Update,
         context: ContextTypes.DEFAULT_TYPE
     ) -> None:
-        """Handle incoming message and send response.
+        """Handle incoming message and orchestrate response generation.
+
+        Processing Flow:
+        ┌─────────────────────────────┐
+        │   Extract message data      │
+        └──────────────┬──────────────┘
+                       │
+                ┌──────┴──────┐
+                │             │
+                ↓             ↓
+        [Load context]  [Retrieve docs]
+        from DB         from Qdrant
+                │             │
+                └──────┬──────┘
+                       │
+                       ↓
+        ┌─────────────────────────────┐
+        │ Generate response via LLM   │
+        │ (with typing indicator)     │
+        └──────────────┬──────────────┘
+                       │
+                       ↓
+        ┌─────────────────────────────┐
+        │ Append citations            │
+        │ (if docs retrieved)         │
+        └──────────────┬──────────────┘
+                       │
+                       ↓
+        ┌─────────────────────────────┐
+        │ Send + persist to database  │
+        └─────────────────────────────┘
 
         Args:
             update: Telegram update containing the message
@@ -56,136 +87,38 @@ class MessageHandler:
             logger.warning("Received update without message or text")
             return
 
-        user_id = update.message.from_user.id
-        chat_id = update.message.chat_id
-        message_id = update.message.message_id
-        user_text = update.message.text
-        reply_to_message_id = update.message.reply_to_message.message_id \
-            if update.message.reply_to_message else None
+        # Extract and validate message data
+        try:
+            message_data = MessageData.from_telegram_message(update.message)
+            logger.debug(f"Processing message: {message_data}")
+        except Exception as e:
+            logger.error(f"Failed to extract message data: {e}", exc_info=True)
+            return
 
-        logger.debug(
-            f"User {user_id} in chat {chat_id}: {user_text[:50]}... "
-            f"(reply_to={reply_to_message_id})"
-        )
+        # Load conversation history if replying to previous message
+        conversation_context = self._load_conversation_context(message_data)
 
-        # Build conversation context if replying to previous message
-        conversation_context: Optional[List[Dict[str, str]]] = None
-        if reply_to_message_id:
-            logger.debug(f"Loading conversation chain for reply_to_message_id={reply_to_message_id}")
-            try:
-                chain = self.db.get_conversation_chain(reply_to_message_id, chat_id, user_id)
-                logger.debug(f"Loaded conversation chain: {len(chain) if chain else 0} messages")
-                if chain:
-                    conversation_context = build_conversation_context(chain)
-                    logger.debug(f"Built conversation context with {len(conversation_context)} context items from {len(chain)} messages")
-                else:
-                    logger.debug(f"No messages found in conversation chain for reply_to_message_id={reply_to_message_id}")
-            except Exception as e:
-                logger.error(f"Error loading conversation chain: {e}", exc_info=True)
-
-        # Retrieve relevant documents if retrieval service available and enabled
-        retrieved_context: str = ""
-        retrieved_chunks: List[RetrievedChunk] = []
-        if self.retrieval_service and self.retrieval_service.should_use_retrieval():
-            logger.debug(f"Retrieving documents for query: {user_text[:50]}...")
-            try:
-                retrieved_chunks = self.retrieval_service.retrieve_context(user_text)
-                if retrieved_chunks:
-                    retrieved_context = self.retrieval_service.format_context(retrieved_chunks)
-                    logger.info(f"Retrieved {len(retrieved_chunks)} chunks for document context")
-
-                    # Log details about each retrieved chunk for debugging
-                    logger.debug(f"📚 RAG RETRIEVAL DETAILS:")
-                    for idx, chunk in enumerate(retrieved_chunks, 1):
-                        logger.debug(f"  [{idx}] Score: {chunk.score:.3f}")
-                        logger.debug(f"      Document: {chunk.metadata.get('document_name', 'N/A') if chunk.metadata else 'N/A'}")
-                        logger.debug(f"      Type: {chunk.metadata.get('document_type', 'N/A') if chunk.metadata else 'N/A'}")
-                        logger.debug(f"      Section: {chunk.metadata.get('section', 'N/A') if chunk.metadata else 'N/A'}")
-                        logger.debug(f"      Preview: {chunk.text[:80]}...")
-
-                    logger.debug(f"📝 AUGMENTED PROMPT CONTEXT:")
-                    logger.debug(f"Context length: {len(retrieved_context)} chars")
-                    logger.debug(f"Context preview:\n{retrieved_context[:300]}...")
-                else:
-                    logger.debug("No relevant documents found for query")
-            except Exception as e:
-                logger.warning(f"Document retrieval failed (continuing without context): {e}")
-                retrieved_context = ""
-                retrieved_chunks = []
-        else:
-            logger.debug("Retrieval service not available or disabled")
+        # Retrieve relevant documents via RAG if enabled
+        retrieved_chunks = self._retrieve_documents(message_data.text)
+        retrieved_context = self.retrieval_service.format_context(retrieved_chunks) if retrieved_chunks else ""
 
         # Generate response with typing indicator
         typing_task = asyncio.create_task(send_typing_action_periodically(update, interval=5))
 
         try:
-            # Prepare augmented conversation context with retrieved documents
-            augmented_context: Optional[List[Dict[str, str]]] = None
-            if conversation_context or retrieved_context:
-                augmented_context = []
-                if retrieved_context:
-                    # Retrieved context is a string, wrap it in a system message
-                    augmented_context.append({
-                        "role": "system",
-                        "content": f"DOCUMENT CONTEXT:\n{retrieved_context}"
-                    })
-                if conversation_context:
-                    augmented_context.extend(conversation_context)
-                logger.debug(f"Augmented context with {len(augmented_context)} items")
-
-                # Log what's being sent to LLM
-                logger.debug(f"📤 SENDING TO LLM:")
-                logger.debug(f"User query: {user_text}")
-                if retrieved_context:
-                    logger.debug(f"RAG context added: {len(retrieved_context)} chars from {len(retrieved_chunks)} chunks")
-                if conversation_context:
-                    logger.debug(f"Conversation context: {len(conversation_context)} items")
-
-            # Run LLM call in executor to keep it non-blocking
-            loop = asyncio.get_event_loop()
-            bot_response = await loop.run_in_executor(
-                None,
-                self.llm_client.generate_response,
-                user_text,
-                augmented_context
-            )
-            logger.debug(f"📥 LLM RESPONSE: {len(bot_response)} chars")
-
-            # Append source citations if documents were retrieved
-            if retrieved_chunks:
-                bot_response = self._append_citations(bot_response, retrieved_chunks)
-                logger.debug(f"Appended citations to response (now {len(bot_response)} chars)")
-
-            # Send response
-            response_message = await update.message.reply_text(bot_response)
-            bot_message_id = response_message.message_id
-
-            # Save user message to database
-            self.db.save_message(
-                message_id=message_id,
-                chat_id=chat_id,
-                sender_type="user",
-                sender_id=str(user_id),
-                text=user_text,
-                reply_to_message_id=reply_to_message_id,
+            bot_response = await self._generate_response(
+                message_data.text,
+                conversation_context,
+                retrieved_context,
+                retrieved_chunks
             )
 
-            # Save bot response message to database
-            self.db.save_message(
-                message_id=bot_message_id,
-                chat_id=chat_id,
-                sender_type="bot",
-                sender_id=self.config.openai_model,  # Use model name as bot identifier
-                text=bot_response,
-                reply_to_message_id=message_id,
-            )
-
-            logger.info(f"Saved messages: user {message_id}, bot {bot_message_id}")
-            logger.debug(f"User message {message_id} in chain with bot response {bot_message_id}")
+            # Send and persist messages
+            await self._send_and_persist(update, message_data, bot_response, retrieved_chunks)
 
         except LLMError as e:
             error_msg = str(e)
-            logger.error(f"LLM error for user {user_id}: {error_msg}")
+            logger.error(f"LLM error for user {message_data.user_id}: {error_msg}")
             await update.message.reply_text(f"Sorry, I encountered an error: {error_msg}")
 
         finally:
@@ -195,6 +128,188 @@ class MessageHandler:
                 await typing_task
             except asyncio.CancelledError:
                 pass
+
+    def _load_conversation_context(self, message_data: MessageData) -> Optional[List[Dict[str, str]]]:
+        """Load conversation chain from database if message replies to previous message.
+
+        Args:
+            message_data: Extracted message data
+
+        Returns:
+            Conversation context list or None if not replying or no chain found
+        """
+        if not message_data.reply_to_message_id:
+            return None
+
+        logger.debug(f"Loading conversation chain for reply_to={message_data.reply_to_message_id}")
+        try:
+            chain = self.db.get_conversation_chain(
+                message_data.reply_to_message_id,
+                message_data.chat_id,
+                message_data.user_id
+            )
+            if not chain:
+                logger.debug(f"No messages found in conversation chain")
+                return None
+
+            conversation_context = build_conversation_context(chain)
+            logger.debug(
+                f"Built conversation context with {len(conversation_context)} items "
+                f"from {len(chain)} messages"
+            )
+            return conversation_context
+
+        except Exception as e:
+            logger.error(f"Error loading conversation chain: {e}", exc_info=True)
+            return None
+
+    def _retrieve_documents(self, query: str) -> List[RetrievedChunk]:
+        """Retrieve relevant document chunks via semantic search.
+
+        Args:
+            query: User query text to search for in documents
+
+        Returns:
+            List of retrieved chunks (empty if retrieval disabled or fails)
+        """
+        if not self.retrieval_service or not self.retrieval_service.should_use_retrieval():
+            logger.debug("Retrieval service not available or disabled")
+            return []
+
+        logger.debug(f"Retrieving documents for query: {query[:50]}...")
+        try:
+            retrieved_chunks = self.retrieval_service.retrieve_context(query)
+
+            if retrieved_chunks:
+                logger.info(f"Retrieved {len(retrieved_chunks)} chunks")
+                self._log_retrieval_details(retrieved_chunks)
+            else:
+                logger.debug("No relevant documents found for query")
+
+            return retrieved_chunks
+
+        except Exception as e:
+            logger.warning(f"Document retrieval failed (continuing without context): {e}")
+            return []
+
+    def _log_retrieval_details(self, retrieved_chunks: List[RetrievedChunk]) -> None:
+        """Log details about retrieved chunks for debugging.
+
+        Args:
+            retrieved_chunks: List of retrieved document chunks
+        """
+        if logger.level > logging.DEBUG:
+            return
+
+        logger.debug("📚 RAG RETRIEVAL DETAILS:")
+        for idx, chunk in enumerate(retrieved_chunks, 1):
+            logger.debug(f"  [{idx}] Score: {chunk.score:.3f}")
+            if chunk.metadata:
+                logger.debug(f"      Document: {chunk.metadata.get('document_name', 'N/A')}")
+                logger.debug(f"      Type: {chunk.metadata.get('document_type', 'N/A')}")
+                logger.debug(f"      Section: {chunk.metadata.get('section', 'N/A')}")
+            logger.debug(f"      Preview: {chunk.text[:80]}...")
+
+    async def _generate_response(
+        self,
+        user_text: str,
+        conversation_context: Optional[List[Dict[str, str]]],
+        retrieved_context: str,
+        retrieved_chunks: List[RetrievedChunk]
+    ) -> str:
+        """Generate LLM response with augmented context.
+
+        Args:
+            user_text: The user's input message
+            conversation_context: Previous messages in conversation chain
+            retrieved_context: Formatted document context from retrieval
+            retrieved_chunks: Raw retrieved chunks for citation
+
+        Returns:
+            Generated response text (possibly with citations appended)
+        """
+        # Prepare augmented context combining conversation history and documents
+        augmented_context: Optional[List[Dict[str, str]]] = None
+        if conversation_context or retrieved_context:
+            augmented_context = []
+            if retrieved_context:
+                augmented_context.append({
+                    "role": "system",
+                    "content": f"DOCUMENT CONTEXT:\n{retrieved_context}"
+                })
+            if conversation_context:
+                augmented_context.extend(conversation_context)
+            logger.debug(f"Augmented context with {len(augmented_context)} items")
+
+        # Log what's being sent to LLM
+        if logger.level <= logging.DEBUG:
+            logger.debug("📤 SENDING TO LLM:")
+            logger.debug(f"User query: {user_text}")
+            if retrieved_context:
+                logger.debug(f"RAG context: {len(retrieved_context)} chars from {len(retrieved_chunks)} chunks")
+            if conversation_context:
+                logger.debug(f"Conversation context: {len(conversation_context)} items")
+
+        # Run LLM call in executor to keep event loop non-blocking
+        loop = asyncio.get_event_loop()
+        bot_response = await loop.run_in_executor(
+            None,
+            self.llm_client.generate_response,
+            user_text,
+            augmented_context
+        )
+        logger.debug(f"📥 LLM RESPONSE: {len(bot_response)} chars")
+
+        # Append source citations if documents were retrieved
+        if retrieved_chunks:
+            bot_response = self._append_citations(bot_response, retrieved_chunks)
+            logger.debug(f"Appended citations (now {len(bot_response)} chars)")
+
+        return bot_response
+
+    async def _send_and_persist(
+        self,
+        update: Update,
+        message_data: MessageData,
+        bot_response: str,
+        retrieved_chunks: List[RetrievedChunk]
+    ) -> None:
+        """Send response via Telegram and persist both messages to database.
+
+        Args:
+            update: Telegram update object
+            message_data: Extracted message data
+            bot_response: Generated response text
+            retrieved_chunks: Retrieved chunks (for potential further processing)
+        """
+        # Send response via Telegram
+        response_message = await update.message.reply_text(bot_response)
+        bot_message_id = response_message.message_id
+
+        # Persist user message
+        self.db.save_message(
+            message_id=message_data.message_id,
+            chat_id=message_data.chat_id,
+            sender_type="user",
+            sender_id=str(message_data.user_id),
+            text=message_data.text,
+            reply_to_message_id=message_data.reply_to_message_id,
+        )
+
+        # Persist bot response
+        self.db.save_message(
+            message_id=bot_message_id,
+            chat_id=message_data.chat_id,
+            sender_type="bot",
+            sender_id=self.config.openai_model,
+            text=bot_response,
+            reply_to_message_id=message_data.message_id,
+        )
+
+        logger.info(
+            f"Sent response to user {message_data.user_id}: "
+            f"user_msg={message_data.message_id}, bot_msg={bot_message_id}"
+        )
 
     def _append_citations(self, response: str, retrieved_chunks: List[RetrievedChunk]) -> str:
         """
