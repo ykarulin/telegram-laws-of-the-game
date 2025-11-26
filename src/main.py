@@ -41,8 +41,20 @@ def main() -> None:
 
         # Create and run application
         application = create_application(config)
-        logger.info("Starting bot with polling...")
-        application.run_polling()
+
+        # Choose between webhook and polling based on configuration
+        if config.telegram_webhook_url:
+            logger.info(f"Starting bot with webhook at {config.telegram_webhook_url}:{config.telegram_webhook_port}...")
+            application.run_webhook(
+                listen="0.0.0.0",
+                port=config.telegram_webhook_port,
+                url_path=config.telegram_webhook_url,
+                webhook_url=f"{config.telegram_webhook_url}",
+                secret_token=config.telegram_webhook_secret_token,
+            )
+        else:
+            logger.info("Starting bot with polling...")
+            application.run_polling()
 
     except ConfigError as e:
         logger.error(f"Configuration Error: {e}")

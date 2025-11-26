@@ -139,3 +139,95 @@ class TestConfigFromEnv:
 
         assert config.openai_model == "gpt-4-turbo"
         assert config.openai_max_tokens == 4096
+
+    def test_config_webhook_defaults_to_none(self, monkeypatch):
+        """Test that webhook settings default to None when not configured."""
+        monkeypatch.setenv("ENVIRONMENT", "development")
+        monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "token")
+        monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+        monkeypatch.setenv("DATABASE_URL", "postgresql://user:pass@localhost/db")
+        monkeypatch.setenv("QDRANT_HOST", "localhost")
+        monkeypatch.setenv("QDRANT_PORT", "6333")
+        monkeypatch.delenv("TELEGRAM_WEBHOOK_URL", raising=False)
+        monkeypatch.delenv("TELEGRAM_WEBHOOK_PORT", raising=False)
+        monkeypatch.delenv("TELEGRAM_WEBHOOK_SECRET_TOKEN", raising=False)
+
+        config = Config.from_env()
+
+        assert config.telegram_webhook_url is None
+        assert config.telegram_webhook_secret_token is None
+
+    def test_config_webhook_custom_port(self, monkeypatch):
+        """Test custom webhook port configuration."""
+        monkeypatch.setenv("ENVIRONMENT", "development")
+        monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "token")
+        monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+        monkeypatch.setenv("DATABASE_URL", "postgresql://user:pass@localhost/db")
+        monkeypatch.setenv("QDRANT_HOST", "localhost")
+        monkeypatch.setenv("QDRANT_PORT", "6333")
+        monkeypatch.setenv("TELEGRAM_WEBHOOK_URL", "https://example.com/webhook")
+        monkeypatch.setenv("TELEGRAM_WEBHOOK_PORT", "9000")
+
+        config = Config.from_env()
+
+        assert config.telegram_webhook_url == "https://example.com/webhook"
+        assert config.telegram_webhook_port == 9000
+
+    def test_config_webhook_default_port(self, monkeypatch):
+        """Test webhook default port is 8443 when URL is set."""
+        monkeypatch.setenv("ENVIRONMENT", "development")
+        monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "token")
+        monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+        monkeypatch.setenv("DATABASE_URL", "postgresql://user:pass@localhost/db")
+        monkeypatch.setenv("QDRANT_HOST", "localhost")
+        monkeypatch.setenv("QDRANT_PORT", "6333")
+        monkeypatch.setenv("TELEGRAM_WEBHOOK_URL", "https://example.com/webhook")
+        monkeypatch.delenv("TELEGRAM_WEBHOOK_PORT", raising=False)
+
+        config = Config.from_env()
+
+        assert config.telegram_webhook_port == 8443
+
+    def test_config_webhook_with_secret_token(self, monkeypatch):
+        """Test webhook configuration with secret token."""
+        monkeypatch.setenv("ENVIRONMENT", "development")
+        monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "token")
+        monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+        monkeypatch.setenv("DATABASE_URL", "postgresql://user:pass@localhost/db")
+        monkeypatch.setenv("QDRANT_HOST", "localhost")
+        monkeypatch.setenv("QDRANT_PORT", "6333")
+        monkeypatch.setenv("TELEGRAM_WEBHOOK_URL", "https://example.com/webhook")
+        monkeypatch.setenv("TELEGRAM_WEBHOOK_SECRET_TOKEN", "secret123")
+
+        config = Config.from_env()
+
+        assert config.telegram_webhook_url == "https://example.com/webhook"
+        assert config.telegram_webhook_secret_token == "secret123"
+
+    def test_config_webhook_invalid_port_too_high(self, monkeypatch):
+        """Test that invalid webhook port raises error."""
+        monkeypatch.setenv("ENVIRONMENT", "development")
+        monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "token")
+        monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+        monkeypatch.setenv("DATABASE_URL", "postgresql://user:pass@localhost/db")
+        monkeypatch.setenv("QDRANT_HOST", "localhost")
+        monkeypatch.setenv("QDRANT_PORT", "6333")
+        monkeypatch.setenv("TELEGRAM_WEBHOOK_URL", "https://example.com/webhook")
+        monkeypatch.setenv("TELEGRAM_WEBHOOK_PORT", "99999")
+
+        with pytest.raises(ConfigError, match="telegram_webhook_port must be between 1 and 65535"):
+            Config.from_env()
+
+    def test_config_webhook_invalid_port_zero(self, monkeypatch):
+        """Test that webhook port cannot be zero."""
+        monkeypatch.setenv("ENVIRONMENT", "development")
+        monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "token")
+        monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+        monkeypatch.setenv("DATABASE_URL", "postgresql://user:pass@localhost/db")
+        monkeypatch.setenv("QDRANT_HOST", "localhost")
+        monkeypatch.setenv("QDRANT_PORT", "6333")
+        monkeypatch.setenv("TELEGRAM_WEBHOOK_URL", "https://example.com/webhook")
+        monkeypatch.setenv("TELEGRAM_WEBHOOK_PORT", "0")
+
+        with pytest.raises(ConfigError, match="telegram_webhook_port must be between 1 and 65535"):
+            Config.from_env()

@@ -25,16 +25,20 @@ class Config:
     openai_max_tokens: int
     openai_temperature: float
     database_url: str
+    # Telegram Webhook Configuration (optional)
+    telegram_webhook_url: str = None
+    telegram_webhook_port: int = 8443
+    telegram_webhook_secret_token: str = None
     # Qdrant Vector Database
-    qdrant_host: str
-    qdrant_port: int
-    qdrant_api_key: str
-    qdrant_collection_name: str
+    qdrant_host: str = None
+    qdrant_port: int = None
+    qdrant_api_key: str = None
+    qdrant_collection_name: str = None
     # Embedding Configuration
-    embedding_model: str
-    embedding_batch_size: int
-    top_k_retrievals: int
-    similarity_threshold: float
+    embedding_model: str = None
+    embedding_batch_size: int = None
+    top_k_retrievals: int = None
+    similarity_threshold: float = None
 
     def __post_init__(self) -> None:
         """Validate configuration values after initialization."""
@@ -67,6 +71,13 @@ class Config:
             raise ConfigError(
                 f"openai_max_tokens must be at least 1, got {self.openai_max_tokens}"
             )
+
+        # Validate webhook port if webhook URL is set
+        if self.telegram_webhook_url:
+            if self.telegram_webhook_port <= 0 or self.telegram_webhook_port > 65535:
+                raise ConfigError(
+                    f"telegram_webhook_port must be between 1 and 65535, got {self.telegram_webhook_port}"
+                )
 
     @classmethod
     def from_env(cls) -> "Config":
@@ -101,6 +112,11 @@ class Config:
         if not qdrant_collection_name:
             raise ConfigError("QDRANT_COLLECTION_NAME environment variable is required")
 
+        # Webhook configuration (optional)
+        webhook_url = os.getenv("TELEGRAM_WEBHOOK_URL")
+        webhook_port = int(os.getenv("TELEGRAM_WEBHOOK_PORT", "8443")) if webhook_url else 8443
+        webhook_secret_token = os.getenv("TELEGRAM_WEBHOOK_SECRET_TOKEN")
+
         return cls(
             environment=environment,
             telegram_bot_token=token,
@@ -111,6 +127,9 @@ class Config:
             openai_max_tokens=int(os.getenv("OPENAI_MAX_TOKENS", "4096")),
             openai_temperature=float(os.getenv("OPENAI_TEMPERATURE", "0.7")),
             database_url=database_url,
+            telegram_webhook_url=webhook_url,
+            telegram_webhook_port=webhook_port,
+            telegram_webhook_secret_token=webhook_secret_token,
             qdrant_host=qdrant_host,
             qdrant_port=qdrant_port,
             qdrant_api_key=os.getenv("QDRANT_API_KEY", ""),
