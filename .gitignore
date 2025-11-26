@@ -2,6 +2,9 @@
 .env
 .env.local
 .env.*.local
+.env.development
+.env.production
+.env.testing
 .venv/
 __pycache__/
 *.py[cod]
