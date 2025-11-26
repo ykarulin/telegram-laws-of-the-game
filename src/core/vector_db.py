@@ -116,7 +116,7 @@ class VectorDatabase:
     def create_collection(
         self,
         collection_name: str,
-        vector_size: int = 512,  # text-embedding-3-small uses 512 dims
+        vector_size: int = 1024,  # multilingual-e5-large uses 1024 dims
         distance: Distance = Distance.COSINE,
     ) -> bool:
         """Create a new vector collection.

@@ -1,0 +1,23 @@
+LAW 11 - OFFSIDE
+
+Position of the player
+
+A player is in an offside position if:
+- the player is nearer to the opponent's goal line than both the ball and the two opponents
+- OR the player is nearer to the opponent's goal line than both the ball and the two opponents
+
+The player is not in an offside position if:
+- the player is in their own half of the pitch
+- OR the player is level with the ball
+- OR the player is level with the two opponents nearest to the goal line
+
+Offside offences occur when:
+- the player is in an offside position
+- the player interferes with play or an opponent
+- the player gains an advantage by being in that position
+
+A player shall not be penalized for an offside position if the player receives the ball directly from a throw-in, a goal kick, or a corner kick.
+
+PENALTY
+
+An indirect free kick is awarded to the opposing team if a player in an offside position interferes with play or an opponent or gains an advantage. The indirect free kick is taken from the position where the offending player was standing when the ball was last touched.

@@ -1,0 +1,23 @@
+REGEL 11 - ABSEITS
+
+Position des Spielers
+
+Ein Spieler befindet sich in einer Abseitsstellung, wenn:
+- der Spieler der gegnerischen Torline näher ist als der Ball und zwei Gegenspieler
+- ODER der Spieler der gegnerischen Torline näher ist als der Ball und zwei Gegenspieler
+
+Der Spieler befindet sich NICHT in einer Abseitsstellung, wenn:
+- der Spieler sich in seiner eigenen Spielfeldhälfte befindet
+- ODER der Spieler auf gleicher Höhe mit dem Ball steht
+- ODER der Spieler auf gleicher Höhe mit den zwei gegnerischen Spielern steht, die der Torline am nächsten sind
+
+Abseitsvergehen werden begangen, wenn:
+- der Spieler sich in einer Abseitsstellung befindet
+- der Spieler das Spiel oder einen Gegenspieler behindert
+- der Spieler Vorteil aus dieser Stellung zieht
+
+Ein Spieler wird nicht für eine Abseitsstellung bestraft, wenn er den Ball direkt aus einem Einwurf, einem Torabstoß oder einer Ecke erhält.
+
+STRAFE
+
+Ein indirekter Freistoß wird gegen die gegnerische Mannschaft verhängt, wenn ein Spieler in Abseitsstellung das Spiel oder einen Gegenspieler behindert oder Vorteil zieht. Der indirekte Freistoß wird vom Platz ausgeführt, an dem sich der übergetretene Spieler befand, als der Ball zuletzt berührt wurde.

@@ -3,18 +3,16 @@ Embedding Service for document chunking and vector generation.
 
 Handles:
 - Document chunking with overlap
-- Text embedding using OpenAI API
+- Text embedding using multilingual-e5-large model
 - Batch processing for efficiency
-- Error handling and retries
+- Support for multiple languages without language detection
 """
 
 import logging
 from typing import List, Dict, Any, Optional
-import time
 from dataclasses import dataclass
 
-import openai
-from openai import OpenAI
+from sentence_transformers import SentenceTransformer
 from src.constants import EmbeddingConfig
 
 logger = logging.getLogger(__name__)
@@ -82,24 +80,36 @@ class Chunk:
 
 
 class EmbeddingService:
-    """Generate embeddings for document chunks using OpenAI API."""
+    """Generate embeddings for document chunks using multilingual-e5-large model."""
 
-    def __init__(self, api_key: str, model: str = "text-embedding-3-small"):
+    def __init__(self, api_key: str = None, model: str = "intfloat/multilingual-e5-large"):
         """
-        Initialize embedding service.
+        Initialize embedding service with self-hosted multilingual model.
 
         Args:
-            api_key: OpenAI API key
-            model: Embedding model name (default: text-embedding-3-small)
+            api_key: Ignored (kept for backward compatibility)
+            model: Model name (default: multilingual-e5-large)
+
+        Note:
+            The api_key parameter is kept for backward compatibility with bot_factory.py
+            but is not used for local embedding inference.
         """
-        self.client = OpenAI(api_key=api_key)
-        self.model = model
-        self.vector_size = self._get_vector_size(model)
+        try:
+            # Load model from Hugging Face (cached after first download)
+            logger.info(f"Loading embedding model: {model}")
+            self.model = SentenceTransformer(model)
+            self.vector_size = self._get_vector_size(model)
+            logger.info(f"Loaded {model} with {self.vector_size} dimensions")
+        except Exception as e:
+            logger.error(f"Failed to load embedding model: {e}")
+            raise
 
     @staticmethod
     def _get_vector_size(model: str) -> int:
         """Get vector dimension size for model."""
-        if "3-small" in model:
+        if "e5-large" in model or "multilingual-e5-large" in model:
+            return EmbeddingConfig.VECTOR_DIMENSIONS_E5_LARGE
+        elif "3-small" in model:
             return EmbeddingConfig.VECTOR_DIMENSIONS_SMALL
         elif "3-large" in model:
             return EmbeddingConfig.VECTOR_DIMENSIONS_LARGE
@@ -208,13 +218,12 @@ class EmbeddingService:
 
         return chunks
 
-    def embed_text(self, text: str, retries: int = 3) -> Optional[List[float]]:
+    def embed_text(self, text: str) -> Optional[List[float]]:
         """
         Generate embedding for a single text string.
 
         Args:
             text: Text to embed
-            retries: Number of retries on failure (default: 3)
 
         Returns:
             List of floats representing the embedding, or None on failure
@@ -222,7 +231,7 @@ class EmbeddingService:
         Examples:
             >>> embedding = service.embed_text("What is VAR?")
             >>> len(embedding)
-            512
+            1024
             >>> isinstance(embedding[0], float)
             True
         """
@@ -230,45 +239,26 @@ class EmbeddingService:
             logger.warning("Empty text provided to embed_text")
             return None
 
-        for attempt in range(retries):
-            try:
-                response = self.client.embeddings.create(
-                    input=text, model=self.model, dimensions=self.vector_size
-                )
-                embedding = response.data[0].embedding
-                logger.debug(f"Embedded text ({len(text)} chars) → {len(embedding)} dims")
-                return embedding
-
-            except openai.RateLimitError:
-                wait_time = (2 ** attempt) + 1  # Exponential backoff
-                logger.warning(
-                    f"Rate limit hit, waiting {wait_time}s before retry "
-                    f"({attempt + 1}/{retries})"
-                )
-                time.sleep(wait_time)
-
-            except openai.APIError as e:
-                logger.error(f"OpenAI API error: {e}")
-                if attempt == retries - 1:
-                    return None
-                time.sleep(1)
-
-        logger.error(f"Failed to embed text after {retries} attempts")
-        return None
+        try:
+            # Local inference - multilingual-e5-large automatically handles any language
+            embedding = self.model.encode(text, convert_to_tensor=False)
+            logger.debug(f"Embedded text ({len(text)} chars) → {len(embedding)} dims")
+            return embedding.tolist()
+        except Exception as e:
+            logger.error(f"Failed to embed text: {e}")
+            return None
 
     def embed_batch(
-        self, texts: List[str], batch_size: int = 100, retries: int = 3
+        self, texts: List[str], batch_size: int = 100
     ) -> List[Optional[List[float]]]:
         """
         Generate embeddings for multiple texts.
 
-        Batches API calls for efficiency. Handles rate limiting with
-        exponential backoff.
+        Efficient batch processing with SentenceTransformer.
 
         Args:
             texts: List of texts to embed
-            batch_size: Number of texts per API call (default: 100, max: 2048)
-            retries: Number of retries per batch (default: 3)
+            batch_size: Number of texts per batch (default: 100)
 
         Returns:
             List of embeddings (one per input text, None if failed)
@@ -281,51 +271,30 @@ class EmbeddingService:
             >>> all(e is not None for e in embeddings)
             True
         """
-        embeddings: List[Optional[List[float]]] = []
+        if not texts:
+            logger.warning("Empty text list provided to embed_batch")
+            return []
 
-        # Process in batches
-        for batch_start in range(0, len(texts), batch_size):
-            batch_end = min(batch_start + batch_size, len(texts))
-            batch_texts = texts[batch_start:batch_end]
+        try:
+            logger.info(f"Embedding batch of {len(texts)} texts...")
 
-            logger.info(
-                f"Embedding batch {batch_start // batch_size + 1} "
-                f"({len(batch_texts)} texts)..."
+            # Use SentenceTransformer's batch processing
+            embeddings = self.model.encode(
+                texts,
+                batch_size=batch_size,
+                convert_to_tensor=False,
+                show_progress_bar=len(texts) > 100
             )
 
-            # Try with exponential backoff
-            for attempt in range(retries):
-                try:
-                    response = self.client.embeddings.create(
-                        input=batch_texts, model=self.model, dimensions=self.vector_size
-                    )
+            # Convert numpy array to list of lists
+            embeddings_list = [embedding.tolist() for embedding in embeddings]
+            logger.info(f"Successfully embedded {len(embeddings_list)} texts")
 
-                    # Extract embeddings in order
-                    batch_embeddings = sorted(
-                        response.data, key=lambda x: x.index
-                    )
-                    embeddings.extend(
-                        [e.embedding for e in batch_embeddings]
-                    )
+            return embeddings_list
 
-                    logger.info(f"Successfully embedded {len(batch_texts)} texts")
-                    break
-
-                except openai.RateLimitError:
-                    wait_time = (2 ** attempt) + 1
-                    logger.warning(
-                        f"Rate limit, waiting {wait_time}s ({attempt + 1}/{retries})"
-                    )
-                    time.sleep(wait_time)
-
-                except openai.APIError as e:
-                    logger.error(f"API error on batch: {e}")
-                    if attempt == retries - 1:
-                        embeddings.extend([None] * len(batch_texts))
-                    else:
-                        time.sleep(1)
-
-        return embeddings
+        except Exception as e:
+            logger.error(f"Failed to embed batch: {e}")
+            return [None] * len(texts)
 
     def embed_chunks(
         self,
@@ -337,7 +306,7 @@ class EmbeddingService:
 
         Args:
             chunks: List of Chunk objects to embed
-            batch_size: Batch size for API calls (default: 100)
+            batch_size: Batch size for embedding (default: 100)
 
         Returns:
             List of dicts with chunk text, embedding, and metadata
@@ -397,27 +366,13 @@ class EmbeddingService:
 
     def estimate_embedding_cost(self, num_texts: int, avg_length: int = 500) -> float:
         """
-        Estimate cost of embedding texts.
-
-        Pricing (as of 2024):
-        - text-embedding-3-small: $0.02 per 1M tokens
-        - text-embedding-3-large: $0.13 per 1M tokens
+        Estimate cost of embedding texts (always 0 for local inference).
 
         Args:
             num_texts: Number of texts to embed
             avg_length: Average length in characters
 
         Returns:
-            Estimated cost in USD
+            Always returns 0 (local inference is free)
         """
-        tokens_per_text = self.estimate_tokens("x" * avg_length)
-        total_tokens = num_texts * tokens_per_text
-
-        if "3-small" in self.model:
-            cost_per_token = 0.02 / 1_000_000
-        elif "3-large" in self.model:
-            cost_per_token = 0.13 / 1_000_000
-        else:
-            cost_per_token = 0.0001 / 1_000_000
-
-        return total_tokens * cost_per_token
+        return 0.0

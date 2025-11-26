@@ -115,7 +115,7 @@ class Config:
             qdrant_port=qdrant_port,
             qdrant_api_key=os.getenv("QDRANT_API_KEY", ""),
             qdrant_collection_name=qdrant_collection_name,
-            embedding_model=os.getenv("EMBEDDING_MODEL", "text-embedding-3-small"),
+            embedding_model=os.getenv("EMBEDDING_MODEL", "intfloat/multilingual-e5-large"),
             embedding_batch_size=int(os.getenv("EMBEDDING_BATCH_SIZE", "100")),
             top_k_retrievals=int(os.getenv("TOP_K_RETRIEVALS", "5")),
             similarity_threshold=float(os.getenv("SIMILARITY_THRESHOLD", "0.7")),
