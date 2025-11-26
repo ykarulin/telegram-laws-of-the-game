@@ -1,32 +1,42 @@
 # Production Deployment Guide
 
-This guide covers deploying the Football Rules Expert Bot to production on a VPS with PostgreSQL.
+This guide covers deploying the Football Rules Expert Bot to production on a VPS with PostgreSQL and optional webhook support.
 
-## Quick Start for Production
+## Quick Start for Production (Polling Mode)
 
-### 1. Start PostgreSQL
+### 1. Start PostgreSQL & Qdrant
 
 ```bash
 docker compose up -d
 ```
 
-### 2. Initialize Database
+### 2. Configure Environment
 
 ```bash
-docker compose exec postgres psql -U telegram_bot telegram_bot_db -f migrations/001_initial_schema.sql
-```
+# Copy and edit .env.production with your credentials
+cp .env.example .env.production
+nano .env.production
 
-### 3. Configure Environment
-
-```bash
-# Edit .env.production with your credentials
+# Set these required values:
+ENVIRONMENT=production
+TELEGRAM_BOT_TOKEN=your_actual_token
+OPENAI_API_KEY=your_actual_key
 DATABASE_URL=postgresql://telegram_bot:your_password@localhost:5432/telegram_bot_db
+QDRANT_HOST=qdrant
+QDRANT_PORT=6333
 ```
 
-### 4. Start Bot
+### 3. Start Bot (Polling Mode - No Domain Needed)
 
 ```bash
-python main.py
+docker build -t telegram-bot:latest .
+docker run -d --network host --env-file .env.production --name telegram-bot telegram-bot:latest
+```
+
+### 4. Sync Documents
+
+```bash
+docker run -it --network host --env-file .env.production telegram-bot:latest python -m src.cli.document_sync
 ```
 
 ## Full Production Setup
@@ -127,15 +137,175 @@ docker compose exec postgres psql -U telegram_bot telegram_bot_db < backup.sql
 
 Set these in `.env.production`:
 
+### Polling Mode (Simpler, recommended for testing)
 ```env
 ENVIRONMENT=production
 TELEGRAM_BOT_TOKEN=your_token
 OPENAI_API_KEY=your_key
-OPENAI_MODEL=gpt-5-mini
+OPENAI_MODEL=gpt-4-turbo
 OPENAI_MAX_TOKENS=4096
-OPENAI_TEMPERATURE=1
+OPENAI_TEMPERATURE=0.7
 LOG_LEVEL=INFO
 DATABASE_URL=postgresql://telegram_bot:password@localhost:5432/telegram_bot_db
+QDRANT_HOST=qdrant
+QDRANT_PORT=6333
+QDRANT_COLLECTION_NAME=football_documents
+
+# Leave webhook settings empty for polling mode
+# TELEGRAM_WEBHOOK_URL=
+# TELEGRAM_WEBHOOK_PORT=8443
+# TELEGRAM_WEBHOOK_SECRET_TOKEN=
+```
+
+### Webhook Mode (Production recommended, requires domain + SSL)
+```env
+ENVIRONMENT=production
+TELEGRAM_BOT_TOKEN=your_token
+OPENAI_API_KEY=your_key
+OPENAI_MODEL=gpt-4-turbo
+OPENAI_MAX_TOKENS=4096
+OPENAI_TEMPERATURE=0.7
+LOG_LEVEL=INFO
+DATABASE_URL=postgresql://telegram_bot:password@localhost:5432/telegram_bot_db
+QDRANT_HOST=qdrant
+QDRANT_PORT=6333
+QDRANT_COLLECTION_NAME=football_documents
+
+# Webhook mode (requires domain)
+TELEGRAM_WEBHOOK_URL=https://your-domain.com/webhook
+TELEGRAM_WEBHOOK_PORT=8443
+TELEGRAM_WEBHOOK_SECRET_TOKEN=your_secret_token_here
+```
+
+## Webhook Setup with Telegram Bot API
+
+If using webhook mode (recommended for production), you need to register the webhook URL with Telegram.
+
+### Prerequisites
+- Domain name pointing to your VPS
+- SSL certificate (Let's Encrypt recommended)
+- Bot already running and listening on the webhook port
+
+### Step 1: Get SSL Certificate
+
+```bash
+# Install Certbot
+sudo apt install certbot python3-certbot-nginx -y
+
+# Get certificate for your domain
+sudo certbot certonly --standalone -d your-domain.com
+
+# Certificate files will be at:
+# /etc/letsencrypt/live/your-domain.com/fullchain.pem
+# /etc/letsencrypt/live/your-domain.com/privkey.pem
+```
+
+### Step 2: Set Up Reverse Proxy (Nginx)
+
+Create `/etc/nginx/sites-available/telegram-bot`:
+
+```nginx
+server {
+    listen 80;
+    server_name your-domain.com;
+    return 301 https://$server_name$request_uri;
+}
+
+server {
+    listen 443 ssl http2;
+    server_name your-domain.com;
+
+    ssl_certificate /etc/letsencrypt/live/your-domain.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/your-domain.com/privkey.pem;
+
+    location /webhook {
+        proxy_pass http://localhost:8443;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}
+```
+
+Enable the site:
+
+```bash
+sudo ln -s /etc/nginx/sites-available/telegram-bot /etc/nginx/sites-enabled/
+sudo nginx -t
+sudo systemctl restart nginx
+```
+
+### Step 3: Start Bot with Webhook Configuration
+
+```bash
+# Update .env.production with webhook settings
+TELEGRAM_WEBHOOK_URL=https://your-domain.com/webhook
+TELEGRAM_WEBHOOK_PORT=8443
+TELEGRAM_WEBHOOK_SECRET_TOKEN=your_secret_token_here
+
+# Start bot
+docker run -d --network host --env-file .env.production --name telegram-bot telegram-bot:latest
+```
+
+### Step 4: Register Webhook with Telegram Bot API
+
+Once your bot is running and listening, register the webhook URL:
+
+```bash
+# Make this API call (replace YOUR_BOT_TOKEN and your-domain.com)
+curl -X POST \
+  https://api.telegram.org/botYOUR_BOT_TOKEN/setWebhook \
+  -H "Content-Type: application/json" \
+  -d '{
+    "url": "https://your-domain.com/webhook",
+    "secret_token": "your_secret_token_here",
+    "allowed_updates": ["message", "callback_query", "inline_query"],
+    "max_connections": 100,
+    "drop_pending_updates": false
+  }'
+```
+
+Expected response:
+```json
+{
+  "ok": true,
+  "result": true,
+  "description": "Webhook was set"
+}
+```
+
+### Step 5: Verify Webhook Registration
+
+```bash
+# Check webhook info
+curl -X GET \
+  https://api.telegram.org/botYOUR_BOT_TOKEN/getWebhookInfo
+```
+
+Expected response:
+```json
+{
+  "ok": true,
+  "result": {
+    "url": "https://your-domain.com/webhook",
+    "has_custom_certificate": false,
+    "pending_update_count": 0,
+    "max_connections": 100,
+    "allowed_updates": ["message", "callback_query", "inline_query"]
+  }
+}
+```
+
+### Step 6: Remove Webhook and Return to Polling (if needed)
+
+```bash
+# Delete webhook
+curl -X POST \
+  https://api.telegram.org/botYOUR_BOT_TOKEN/deleteWebhook
+
+# Then restart bot without webhook configuration
+# The bot will automatically switch to polling mode
 ```
 
 ## Monitoring
@@ -167,6 +337,72 @@ df -h
 6. Monitor resource usage
 
 ## Troubleshooting
+
+### Webhook Issues
+
+**Webhook not being called**
+```bash
+# Check webhook status
+curl -X GET https://api.telegram.org/botYOUR_BOT_TOKEN/getWebhookInfo
+
+# Check if bot is listening on port 8443
+sudo netstat -tlnp | grep 8443
+
+# Check bot logs for errors
+docker logs telegram-bot
+
+# If nginx is forwarding, check nginx status
+sudo systemctl status nginx
+sudo nginx -t
+sudo tail -f /var/log/nginx/error.log
+```
+
+**Webhook returns 403/401**
+```bash
+# Verify secret token matches
+# In .env.production:
+TELEGRAM_WEBHOOK_SECRET_TOKEN=your_secret_token_here
+
+# Must match exactly in setWebhook call:
+# "secret_token": "your_secret_token_here"
+
+# Restart bot after changing token
+docker restart telegram-bot
+```
+
+**SSL Certificate Issues**
+```bash
+# Verify certificate is valid
+curl -I https://your-domain.com/webhook
+
+# Check certificate expiration
+sudo certbot certificates
+
+# Renew certificate
+sudo certbot renew
+
+# Telegram requires valid SSL - check with:
+curl --cacert /etc/letsencrypt/live/your-domain.com/chain.pem \
+  https://your-domain.com/webhook
+```
+
+### Polling Mode Fallback
+```bash
+# If webhook is not working, the bot will NOT automatically switch to polling
+# You must manually delete the webhook:
+
+curl -X POST https://api.telegram.org/botYOUR_BOT_TOKEN/deleteWebhook
+
+# Then remove webhook settings from .env.production:
+# TELEGRAM_WEBHOOK_URL=
+# TELEGRAM_WEBHOOK_PORT=
+# TELEGRAM_WEBHOOK_SECRET_TOKEN=
+
+# Restart bot
+docker restart telegram-bot
+
+# Bot will now use polling mode
+```
 
 ### Bot won't start
 ```bash
