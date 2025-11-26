@@ -1,13 +1,14 @@
 """Message handler for processing Telegram messages."""
 import logging
 import asyncio
-from typing import Optional
+from typing import Optional, List, Dict
 from telegram import Update
 from telegram.ext import ContextTypes
 from src.config import Config
 from src.core.llm import LLMClient
 from src.core.db import ConversationDatabase
 from src.core.conversation import build_conversation_context
+from src.core.vector_db import RetrievedChunk
 from src.services.embedding_service import EmbeddingService
 from src.services.retrieval_service import RetrievalService
 from src.handlers.typing_indicator import send_typing_action_periodically
@@ -68,7 +69,7 @@ class MessageHandler:
         )
 
         # Build conversation context if replying to previous message
-        conversation_context: Optional[list] = None
+        conversation_context: Optional[List[Dict[str, str]]] = None
         if reply_to_message_id:
             logger.debug(f"Loading conversation chain for reply_to_message_id={reply_to_message_id}")
             try:
@@ -83,8 +84,8 @@ class MessageHandler:
                 logger.error(f"Error loading conversation chain: {e}", exc_info=True)
 
         # Retrieve relevant documents if retrieval service available and enabled
-        retrieved_context = ""
-        retrieved_chunks = []
+        retrieved_context: str = ""
+        retrieved_chunks: List[RetrievedChunk] = []
         if self.retrieval_service and self.retrieval_service.should_use_retrieval():
             logger.debug(f"Retrieving documents for query: {user_text[:50]}...")
             try:
@@ -119,7 +120,7 @@ class MessageHandler:
 
         try:
             # Prepare augmented conversation context with retrieved documents
-            augmented_context = None
+            augmented_context: Optional[List[Dict[str, str]]] = None
             if conversation_context or retrieved_context:
                 augmented_context = []
                 if retrieved_context:
@@ -195,7 +196,7 @@ class MessageHandler:
             except asyncio.CancelledError:
                 pass
 
-    def _append_citations(self, response: str, retrieved_chunks: list) -> str:
+    def _append_citations(self, response: str, retrieved_chunks: List[RetrievedChunk]) -> str:
         """
         Append unique source citations to bot response.
 

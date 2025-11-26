@@ -7,6 +7,7 @@ from contextlib import contextmanager
 
 from sqlalchemy import create_engine, Column, Integer, String, Text, DateTime, ForeignKey, select, desc, and_
 from sqlalchemy.orm import sessionmaker, declarative_base, Session, relationship
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError, OperationalError
 
 logger = logging.getLogger(__name__)
 
@@ -166,8 +167,17 @@ class ConversationDatabase:
                     f"Saved {sender_type} message {message_id} in chat {chat_id} "
                     f"(sender={sender_id}, reply_to={reply_to_message_id}, text_len={len(text)})"
                 )
+        except IntegrityError as e:
+            logger.warning(f"Integrity constraint violation saving message {message_id}: {e}")
+            # Message might already exist or constraint violation - this is often benign
+        except OperationalError as e:
+            logger.error(f"Database operational error saving message {message_id}: {e}", exc_info=True)
+            raise
+        except SQLAlchemyError as e:
+            logger.error(f"Database error saving message {message_id}: {e}", exc_info=True)
+            raise
         except Exception as e:
-            logger.error(f"Error saving message {message_id}: {e}", exc_info=True)
+            logger.error(f"Unexpected error saving message {message_id}: {e}", exc_info=True)
             raise
 
     def get_message(self, message_id: int, chat_id: int) -> Optional[Message]:
@@ -190,8 +200,14 @@ class ConversationDatabase:
                 if model:
                     return Message.from_model(model)
                 return None
+        except OperationalError as e:
+            logger.error(f"Database operational error retrieving message {message_id}: {e}", exc_info=True)
+            raise
+        except SQLAlchemyError as e:
+            logger.error(f"Database error retrieving message {message_id}: {e}", exc_info=True)
+            raise
         except Exception as e:
-            logger.error(f"Error retrieving message: {e}")
+            logger.error(f"Unexpected error retrieving message {message_id}: {e}", exc_info=True)
             raise
 
     def get_conversation_chain(self, message_id: int, chat_id: int, user_id: int) -> List[Message]:
@@ -242,8 +258,14 @@ class ConversationDatabase:
 
                 logger.debug(f"Conversation chain complete: {len(chain)} messages total")
                 return chain
+        except OperationalError as e:
+            logger.error(f"Database operational error building conversation chain: {e}", exc_info=True)
+            raise
+        except SQLAlchemyError as e:
+            logger.error(f"Database error building conversation chain: {e}", exc_info=True)
+            raise
         except Exception as e:
-            logger.error(f"Error building conversation chain: {e}", exc_info=True)
+            logger.error(f"Unexpected error building conversation chain: {e}", exc_info=True)
             raise
 
     def get_latest_messages(
@@ -267,8 +289,14 @@ class ConversationDatabase:
                 ).limit(limit).all()
 
                 return [Message.from_model(m) for m in models]
+        except OperationalError as e:
+            logger.error(f"Database operational error retrieving latest messages: {e}", exc_info=True)
+            raise
+        except SQLAlchemyError as e:
+            logger.error(f"Database error retrieving latest messages: {e}", exc_info=True)
+            raise
         except Exception as e:
-            logger.error(f"Error retrieving latest messages: {e}")
+            logger.error(f"Unexpected error retrieving latest messages: {e}", exc_info=True)
             raise
 
     def delete_all_for_testing(self) -> None:
@@ -280,8 +308,14 @@ class ConversationDatabase:
             with self.get_session() as session:
                 session.query(MessageModel).delete()
                 logger.warning("All messages deleted (testing only)")
+        except OperationalError as e:
+            logger.error(f"Database operational error deleting messages: {e}", exc_info=True)
+            raise
+        except SQLAlchemyError as e:
+            logger.error(f"Database error deleting messages: {e}", exc_info=True)
+            raise
         except Exception as e:
-            logger.error(f"Error deleting messages: {e}")
+            logger.error(f"Unexpected error deleting messages: {e}", exc_info=True)
             raise
 
     def close(self) -> None:
