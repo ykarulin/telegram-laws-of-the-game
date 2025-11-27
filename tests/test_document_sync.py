@@ -392,3 +392,185 @@ class TestDocumentSync:
 
         # States should be identical
         assert state_v1 == state_v2
+
+
+class TestDocumentSyncRelativePath:
+    """Tests for relative_path preservation in document sync workflow."""
+
+    @pytest.fixture
+    def mock_config(self):
+        """Create a mock config for testing."""
+        config = MagicMock(spec=Config)
+        config.environment = Environment.DEVELOPMENT
+        config.openai_api_key = "sk-test-key"
+        config.embedding_model = "text-embedding-3-small"
+        config.qdrant_host = "localhost"
+        config.qdrant_port = 6333
+        config.qdrant_api_key = None
+        config.qdrant_collection_name = "football_documents"
+        config.database_url = "postgresql://test"
+        return config
+
+    @pytest.fixture
+    def temp_knowledgebase(self):
+        """Create temporary knowledgebase directories."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            base_path = Path(tmpdir)
+
+            # Create directory structure with subfolders
+            upload_base = base_path / "upload"
+            indexed_base = base_path / "indexed"
+            archive_dir = base_path / "archive"
+
+            # Create structured directories
+            (upload_base / "laws_of_game").mkdir(parents=True)
+            (upload_base / "faq").mkdir(parents=True)
+            (upload_base / "tournament_rules").mkdir(parents=True)
+            (indexed_base / "laws_of_game").mkdir(parents=True)
+            (indexed_base / "faq").mkdir(parents=True)
+            (indexed_base / "tournament_rules").mkdir(parents=True)
+            archive_dir.mkdir(parents=True)
+
+            yield {
+                "base": base_path,
+                "upload": upload_base,
+                "indexed": indexed_base,
+                "archive": archive_dir
+            }
+
+    def test_relative_path_extraction_single_level(self):
+        """Test relative_path extraction for single folder level."""
+        relative_path = "laws_of_game/laws_2024-25.pdf"
+        parts = Path(relative_path).parts
+        doc_type = parts[0]
+
+        assert doc_type == "laws_of_game"
+        assert relative_path == "laws_of_game/laws_2024-25.pdf"
+
+    def test_relative_path_extraction_multiple_levels(self):
+        """Test relative_path extraction for nested folders."""
+        relative_path = "laws_of_game/2024/laws_with_images.pdf"
+        parts = Path(relative_path).parts
+        doc_type = parts[0]
+
+        assert doc_type == "laws_of_game"
+        assert relative_path == "laws_of_game/2024/laws_with_images.pdf"
+
+    def test_relative_path_format_consistency(self):
+        """Test that relative_path format is consistent across systems."""
+        # Simulate paths from different subfolder structures
+        paths = [
+            "laws_of_game/laws_2024-25.pdf",
+            "laws_of_game/interpretations/interp_2024.pdf",
+            "faq/general_questions.txt",
+            "faq/technical/errors.txt",
+        ]
+
+        for relative_path in paths:
+            parts = Path(relative_path).parts
+            doc_type = parts[0]
+
+            # Should preserve full path
+            assert str(Path(relative_path)) == relative_path
+            # Should extract first folder as type
+            assert doc_type in ["laws_of_game", "faq"]
+
+    def test_relative_path_in_file_structure(self, temp_knowledgebase):
+        """Test that relative_path matches actual file structure."""
+        # Create files with structure
+        test_files = {
+            "laws_of_game/laws_2024-25.pdf": "Laws content",
+            "laws_of_game/interpretations_2024.pdf": "Interpretations",
+            "faq/general_2024.txt": "General FAQ",
+            "tournament_rules/league_rules.md": "League Rules",
+        }
+
+        # Write files to upload directory
+        for relative_path, content in test_files.items():
+            file_path = temp_knowledgebase["upload"] / relative_path
+            file_path.parent.mkdir(parents=True, exist_ok=True)
+            file_path.write_text(content)
+
+        # Verify structure
+        for relative_path in test_files.keys():
+            full_path = temp_knowledgebase["upload"] / relative_path
+            assert full_path.exists()
+            assert full_path.read_text() == test_files[relative_path]
+
+    def test_relative_path_preserved_after_move(self, temp_knowledgebase):
+        """Test that files maintain relative_path structure when moved to indexed."""
+        # Create file in upload
+        source_relative = "laws_of_game/laws_2024-25.pdf"
+        source_file = temp_knowledgebase["upload"] / source_relative
+        source_file.write_text("Laws content")
+
+        # Move to indexed (simulating document sync)
+        dest_file = temp_knowledgebase["indexed"] / source_relative
+        dest_file.parent.mkdir(parents=True, exist_ok=True)
+        source_file.rename(dest_file)
+
+        # Verify relative_path still valid
+        assert not source_file.exists()
+        assert dest_file.exists()
+
+        # Relative path should be same
+        indexed_relative = str(dest_file.relative_to(temp_knowledgebase["indexed"]))
+        assert indexed_relative == source_relative
+
+    def test_multiple_documents_preserve_structure(self, temp_knowledgebase):
+        """Test that sync preserves folder structure for multiple documents."""
+        documents = [
+            "laws_of_game/laws_2024-25.pdf",
+            "laws_of_game/interpretations_2024.pdf",
+            "faq/general_2024.txt",
+            "faq/technical_2024.txt",
+            "tournament_rules/league_2024.md",
+        ]
+
+        # Create all files
+        for relative_path in documents:
+            file_path = temp_knowledgebase["upload"] / relative_path
+            file_path.parent.mkdir(parents=True, exist_ok=True)
+            file_path.write_text(f"Content for {relative_path}")
+
+        # Find all pending files (simulating get_pending_files)
+        pending = {}
+        for file_path in temp_knowledgebase["upload"].rglob("*"):
+            if file_path.is_file():
+                relative_path = str(file_path.relative_to(temp_knowledgebase["upload"]))
+                pending[relative_path] = file_path
+
+        # Verify all documents found with correct paths
+        assert len(pending) == len(documents)
+        for doc in documents:
+            assert doc in pending
+
+    def test_relative_path_uniqueness_after_reset(self, temp_knowledgebase):
+        """Test that relative_path allows recovery of folder structure after reset."""
+        # Simulate upload and indexing
+        relative_paths = [
+            "laws_of_game/laws_2024-25.pdf",
+            "laws_of_game/2024/interpretations.pdf",
+            "faq/general_2024.txt",
+            "tournament_rules/league_2024.md",
+        ]
+
+        # Create indexed files
+        indexed_files = {}
+        for relative_path in relative_paths:
+            file_path = temp_knowledgebase["indexed"] / relative_path
+            file_path.parent.mkdir(parents=True, exist_ok=True)
+            file_path.write_text(f"Content for {relative_path}")
+            indexed_files[relative_path] = file_path
+
+        # Simulate reset: move all files back to upload with their relative_path preserved
+        for relative_path, indexed_file in indexed_files.items():
+            upload_file = temp_knowledgebase["upload"] / relative_path
+            upload_file.parent.mkdir(parents=True, exist_ok=True)
+            indexed_file.rename(upload_file)
+
+        # Verify structure is restored
+        for relative_path in relative_paths:
+            restored_file = temp_knowledgebase["upload"] / relative_path
+            assert restored_file.exists()
+            assert restored_file.read_text() == f"Content for {relative_path}"

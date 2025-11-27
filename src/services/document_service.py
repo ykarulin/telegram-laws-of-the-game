@@ -34,6 +34,7 @@ class DocumentInfo:
     uploaded_at: datetime
     qdrant_status: str  # 'pending', 'indexed', 'failed'
     error_message: Optional[str]
+    relative_path: Optional[str]  # Full path from knowledgebase/upload
     created_at: datetime
     updated_at: datetime
 
@@ -53,6 +54,7 @@ class DocumentContent:
     qdrant_status: str
     qdrant_collection_id: Optional[str]
     error_message: Optional[str]
+    relative_path: Optional[str]  # Full path from knowledgebase/upload
     created_at: datetime
     updated_at: datetime
 
@@ -80,6 +82,7 @@ class DocumentService:
         source_url: Optional[str] = None,
         uploaded_by: Optional[str] = None,
         metadata: Optional[Dict[str, Any]] = None,
+        relative_path: Optional[str] = None,
     ) -> int:
         """
         Upload and store a document.
@@ -94,6 +97,7 @@ class DocumentService:
             source_url: Where document was obtained
             uploaded_by: User who uploaded (e.g., admin user ID)
             metadata: Additional metadata as dict
+            relative_path: Full path from knowledgebase/upload (e.g., "laws_of_game/laws_2024-25.pdf")
 
         Returns:
             Document ID in database
@@ -106,7 +110,8 @@ class DocumentService:
             ...     name="Laws 2024",
             ...     document_type="laws_of_game",
             ...     content="The field of play...",
-            ...     version="2024-25"
+            ...     version="2024-25",
+            ...     relative_path="laws_of_game/laws_2024-25.pdf"
             ... )
             >>> doc_id
             1
@@ -123,11 +128,11 @@ class DocumentService:
                 INSERT INTO documents (
                     name, document_type, version, content,
                     source_url, uploaded_by, metadata,
-                    qdrant_status, created_at, updated_at
+                    relative_path, qdrant_status, created_at, updated_at
                 ) VALUES (
                     :name, :doc_type, :version, :content,
                     :source_url, :uploaded_by, :metadata,
-                    'pending', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+                    :relative_path, 'pending', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
                 )
                 RETURNING id
             """)
@@ -142,6 +147,7 @@ class DocumentService:
                     "source_url": source_url,
                     "uploaded_by": uploaded_by,
                     "metadata": metadata_json,
+                    "relative_path": relative_path,
                 },
             )
 
@@ -203,6 +209,7 @@ class DocumentService:
                 qdrant_status=row["qdrant_status"],
                 qdrant_collection_id=row["qdrant_collection_id"],
                 error_message=row["error_message"],
+                relative_path=row["relative_path"],
                 created_at=row["created_at"],
                 updated_at=row["updated_at"],
             )
@@ -247,7 +254,7 @@ class DocumentService:
             query_str = f"""
                 SELECT id, name, document_type, version, source_url,
                        uploaded_by, uploaded_at, qdrant_status,
-                       error_message, created_at, updated_at
+                       error_message, relative_path, created_at, updated_at
                 FROM documents
                 {where_sql}
                 ORDER BY uploaded_at DESC
@@ -269,6 +276,7 @@ class DocumentService:
                         uploaded_at=row_dict["uploaded_at"],
                         qdrant_status=row_dict["qdrant_status"],
                         error_message=row_dict["error_message"],
+                        relative_path=row_dict["relative_path"],
                         created_at=row_dict["created_at"],
                         updated_at=row_dict["updated_at"],
                     )

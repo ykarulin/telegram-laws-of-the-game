@@ -25,7 +25,9 @@ GUIDELINES:
 - Keep responses concise and informative.
 - If you're unsure about a rule, say so explicitly.
 - Do NOT end your response by prompting the user for follow-up questions or asking for scenarios.
-- Do NOT invite the user to provide additional details or examples."""
+- Do NOT invite the user to provide additional details or examples.
+- Do NOT add closing statements that invite further interaction, such as "If you need..." or "Feel free to ask..." or similar phrases in any language.
+- End your response with the answer itself. No additional invitations or prompts should follow your main content."""
 
 
 # Default system prompt (for backward compatibility with tests)

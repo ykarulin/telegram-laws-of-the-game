@@ -17,7 +17,12 @@ logger = logging.getLogger(__name__)
 logging.getLogger("httpcore").setLevel(logging.WARNING)
 logging.getLogger("httpcore.connection").setLevel(logging.WARNING)
 logging.getLogger("httpcore.http11").setLevel(logging.WARNING)
+logging.getLogger("pdfminer").setLevel(logging.WARNING)
 logging.getLogger("pdfminer.psparser").setLevel(logging.WARNING)
+logging.getLogger("pdfminer.pdfpage").setLevel(logging.WARNING)
+logging.getLogger("pdfminer.cmapdb").setLevel(logging.WARNING)
+logging.getLogger("pdfminer.pdfinterp").setLevel(logging.WARNING)
+logging.getLogger("pdfminer.pdfdocument").setLevel(logging.WARNING)
 logging.getLogger("urllib3.connectionpool").setLevel(logging.WARNING)
 
 

@@ -63,6 +63,7 @@ class DocumentCLI:
         version: Optional[str] = None,
         source_url: Optional[str] = None,
         uploaded_by: str = "cli",
+        relative_path: Optional[str] = None,
     ) -> bool:
         """Upload a document for indexing.
 
@@ -72,6 +73,7 @@ class DocumentCLI:
             version: Document version (e.g., 2024-25)
             source_url: Where document was obtained
             uploaded_by: User who uploaded (default: cli)
+            relative_path: Full relative path from knowledgebase/upload (optional)
 
         Returns:
             True if successful, False otherwise
@@ -128,6 +130,7 @@ class DocumentCLI:
                 source_url=source_url,
                 uploaded_by=uploaded_by,
                 metadata={"file_size": len(content), "file_path": str(file_path)},
+                relative_path=relative_path,
             )
             print(f"✓ Document uploaded with ID: {doc_id}")
             print(f"📋 Status: Pending (awaiting indexing)")
@@ -559,7 +562,12 @@ def main():
     logging.getLogger("httpcore").setLevel(logging.WARNING)
     logging.getLogger("httpcore.connection").setLevel(logging.WARNING)
     logging.getLogger("httpcore.http11").setLevel(logging.WARNING)
+    logging.getLogger("pdfminer").setLevel(logging.WARNING)
     logging.getLogger("pdfminer.psparser").setLevel(logging.WARNING)
+    logging.getLogger("pdfminer.pdfpage").setLevel(logging.WARNING)
+    logging.getLogger("pdfminer.cmapdb").setLevel(logging.WARNING)
+    logging.getLogger("pdfminer.pdfinterp").setLevel(logging.WARNING)
+    logging.getLogger("pdfminer.pdfdocument").setLevel(logging.WARNING)
     logging.getLogger("urllib3.connectionpool").setLevel(logging.WARNING)
 
     # Create CLI instance
