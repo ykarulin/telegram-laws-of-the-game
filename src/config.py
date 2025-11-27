@@ -41,6 +41,11 @@ class Config:
     top_k_retrievals: int = None
     similarity_threshold: float = None
     rag_dynamic_threshold_margin: Optional[float] = None
+    # Document Lookup Tool Configuration
+    max_document_lookups: int = None
+    lookup_max_chunks: int = None
+    require_tool_use: bool = False
+    enable_document_selection: bool = True
 
     def __post_init__(self) -> None:
         """Validate configuration values after initialization."""
@@ -68,6 +73,19 @@ class Config:
             if not 0.0 <= self.rag_dynamic_threshold_margin <= 1.0:
                 raise ConfigError(
                     f"rag_dynamic_threshold_margin must be between 0.0 and 1.0, got {self.rag_dynamic_threshold_margin}"
+                )
+
+        # Validate document lookup tool configuration
+        if self.max_document_lookups is not None:
+            if self.max_document_lookups < 1:
+                raise ConfigError(
+                    f"max_document_lookups must be at least 1, got {self.max_document_lookups}"
+                )
+
+        if self.lookup_max_chunks is not None:
+            if self.lookup_max_chunks < 1:
+                raise ConfigError(
+                    f"lookup_max_chunks must be at least 1, got {self.lookup_max_chunks}"
                 )
 
         if self.qdrant_port <= 0 or self.qdrant_port > 65535:
@@ -147,6 +165,10 @@ class Config:
             top_k_retrievals=int(os.getenv("TOP_K_RETRIEVALS", "5")),
             similarity_threshold=float(os.getenv("SIMILARITY_THRESHOLD", "0.7")),
             rag_dynamic_threshold_margin=float(os.getenv("RAG_DYNAMIC_THRESHOLD_MARGIN")) if os.getenv("RAG_DYNAMIC_THRESHOLD_MARGIN") else None,
+            max_document_lookups=int(os.getenv("MAX_DOCUMENT_LOOKUPS", "5")),
+            lookup_max_chunks=int(os.getenv("LOOKUP_MAX_CHUNKS", "5")),
+            require_tool_use=os.getenv("REQUIRE_TOOL_USE", "false").lower() == "true",
+            enable_document_selection=os.getenv("ENABLE_DOCUMENT_SELECTION", "true").lower() == "true",
         )
 
 

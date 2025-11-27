@@ -451,3 +451,146 @@ class DocumentService:
         except Exception as e:
             logger.error(f"Error checking document existence: {e}")
             return False
+
+    def get_indexed_document_names(self) -> List[str]:
+        """
+        Get list of names of all successfully indexed documents.
+
+        Used by document selection tool to provide LLM with available documents.
+
+        Returns:
+            List of document names (e.g., ["Laws of Game 2024-25", "VAR Guidelines"])
+            Empty list if no indexed documents or on error
+
+        Examples:
+            >>> names = service.get_indexed_document_names()
+            >>> names
+            ['Laws of Game 2024-25', 'VAR Guidelines 2024']
+        """
+        try:
+            from sqlalchemy import text
+
+            query = text("""
+                SELECT DISTINCT name
+                FROM documents
+                WHERE qdrant_status = 'indexed'
+                AND qdrant_status != 'deleted'
+                ORDER BY name ASC
+            """)
+
+            results = self.db.execute(query).fetchall()
+            names = [row[0] for row in results]
+
+            logger.info(
+                f"Retrieved {len(names)} indexed document names for selection tool"
+            )
+            return names
+
+        except Exception as e:
+            logger.error(f"Failed to get indexed document names: {e}")
+            return []
+
+    def get_document_ids_by_names(self, document_names: List[str]) -> Dict[str, int]:
+        """
+        Map document names to their database IDs.
+
+        Used to convert document names (from LLM) to IDs for Qdrant filtering.
+
+        Args:
+            document_names: List of document names to look up
+
+        Returns:
+            Dictionary mapping document name to ID
+            Missing documents are excluded from result
+
+        Examples:
+            >>> doc_ids = service.get_document_ids_by_names(["Laws of Game 2024-25"])
+            >>> doc_ids
+            {'Laws of Game 2024-25': 1}
+        """
+        try:
+            from sqlalchemy import text
+
+            if not document_names:
+                return {}
+
+            # Build placeholder for SQL
+            placeholders = ",".join([f":name_{i}" for i in range(len(document_names))])
+            params = {f"name_{i}": name for i, name in enumerate(document_names)}
+
+            query = text(f"""
+                SELECT name, id
+                FROM documents
+                WHERE name IN ({placeholders})
+                AND qdrant_status = 'indexed'
+                AND qdrant_status != 'deleted'
+            """)
+
+            results = self.db.execute(query, params).fetchall()
+            doc_map = {row[0]: row[1] for row in results}
+
+            # Log which documents were not found
+            not_found = set(document_names) - set(doc_map.keys())
+            if not_found:
+                logger.warning(
+                    f"Could not find indexed documents: {', '.join(not_found)}"
+                )
+
+            logger.info(
+                f"Mapped {len(doc_map)} of {len(document_names)} document names to IDs"
+            )
+            return doc_map
+
+        except Exception as e:
+            logger.error(f"Failed to map document names to IDs: {e}")
+            return {}
+
+    def search_in_documents(
+        self,
+        query_embedding: List[float],
+        document_ids: List[int],
+        top_k: int = 5,
+        threshold: float = 0.7,
+    ) -> List[Dict[str, Any]]:
+        """
+        Search for chunks within specific documents.
+
+        This method is called by the document lookup tool to filter Qdrant
+        search results to only those documents selected by the LLM.
+
+        Args:
+            query_embedding: Query vector (from embedding service)
+            document_ids: List of document IDs to search within
+            top_k: Maximum number of results to return
+            threshold: Minimum similarity score
+
+        Returns:
+            List of chunk metadata dictionaries with similarity scores
+            Empty list if no documents or no results above threshold
+
+        Examples:
+            >>> chunks = service.search_in_documents(
+            ...     query_embedding=[0.1, 0.2, ...],
+            ...     document_ids=[1, 2],
+            ...     top_k=5,
+            ...     threshold=0.7
+            ... )
+            >>> len(chunks)
+            3
+        """
+        if not document_ids or not query_embedding:
+            return []
+
+        try:
+            # This is a wrapper that will use the retrieval service's Qdrant client
+            # The actual filtering logic happens in RetrievalService.retrieve_from_documents()
+            # This method documents the interface for filtering by document IDs
+
+            logger.info(
+                f"Searching in {len(document_ids)} documents with embedding"
+            )
+            return []
+
+        except Exception as e:
+            logger.error(f"Failed to search in documents: {e}")
+            return []

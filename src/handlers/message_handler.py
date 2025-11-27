@@ -1,16 +1,17 @@
 """Message handler for processing Telegram messages."""
 import logging
 import asyncio
-from typing import Optional, List, Dict
+from typing import Optional, List, Dict, Any
 from telegram import Update
 from telegram.ext import ContextTypes
 from src.config import Config
-from src.core.llm import LLMClient
+from src.core.llm import LLMClient, get_system_prompt_with_document_selection
 from src.core.db import ConversationDatabase
 from src.core.conversation import build_conversation_context
 from src.core.vector_db import RetrievedChunk
 from src.services.embedding_service import EmbeddingService
 from src.services.retrieval_service import RetrievalService
+from src.tools.document_lookup_tool import DocumentLookupTool
 from src.handlers.typing_indicator import send_typing_action_periodically
 from src.models.message_data import MessageData
 from src.exceptions import LLMError
@@ -32,7 +33,8 @@ class MessageHandler:
         llm_client: LLMClient,
         db: ConversationDatabase,
         config: Config,
-        retrieval_service: Optional[RetrievalService] = None
+        retrieval_service: Optional[RetrievalService] = None,
+        embedding_service: Optional[EmbeddingService] = None,
     ):
         """Initialize message handler.
 
@@ -41,11 +43,27 @@ class MessageHandler:
             db: Conversation database
             config: Bot configuration
             retrieval_service: Optional retrieval service for RAG (if None, no retrieval)
+            embedding_service: Optional embedding service for document lookup tool
         """
         self.llm_client = llm_client
         self.db = db
         self.config = config
         self.retrieval_service = retrieval_service
+        self.embedding_service = embedding_service
+
+        # Initialize document lookup tool if both services available
+        self.document_lookup_tool: Optional[DocumentLookupTool] = None
+        if (
+            self.config.enable_document_selection
+            and self.retrieval_service
+            and self.embedding_service
+        ):
+            self.document_lookup_tool = DocumentLookupTool(
+                config=config,
+                embedding_service=embedding_service,
+                retrieval_service=retrieval_service,
+            )
+            logger.info("Document lookup tool initialized for message handler")
 
     async def handle(
         self,
@@ -240,6 +258,51 @@ class MessageHandler:
             retrieved_chunks: List of retrieved document chunks
         """
         debug_log_rag_retrieval(logger, retrieved_chunks)
+
+    def _get_available_documents(self) -> List[str]:
+        """Get list of available indexed documents for the LLM.
+
+        Returns:
+            List of document names, empty if none available
+
+        Examples:
+            >>> docs = handler._get_available_documents()
+            >>> len(docs) > 0
+            True
+        """
+        if not self.retrieval_service:
+            return []
+
+        try:
+            docs = self.retrieval_service.get_indexed_documents()
+            logger.debug(f"Retrieved {len(docs)} indexed documents for tool")
+            return docs
+        except Exception as e:
+            logger.error(f"Failed to get available documents: {e}")
+            return []
+
+    def _prepare_document_context(self, document_names: List[str]) -> str:
+        """Prepare formatted document list for LLM prompt.
+
+        Args:
+            document_names: List of indexed document names
+
+        Returns:
+            Formatted document list string, empty if no documents
+
+        Examples:
+            >>> context = handler._prepare_document_context(["Doc1", "Doc2"])
+            >>> "1. Doc1" in context
+            True
+        """
+        if not document_names or not self.retrieval_service:
+            return ""
+
+        try:
+            return self.retrieval_service.format_document_list(document_names)
+        except Exception as e:
+            logger.error(f"Failed to format document list: {e}")
+            return ""
 
     async def _generate_response(
         self,

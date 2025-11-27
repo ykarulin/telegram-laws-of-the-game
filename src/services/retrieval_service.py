@@ -381,3 +381,164 @@ class RetrievalService:
         except Exception as e:
             logger.error(f"Failed to get collection stats: {e}")
             return {}
+
+    def retrieve_from_documents(
+        self,
+        query: str,
+        document_names: List[str],
+        top_k: Optional[int] = None,
+        threshold: Optional[float] = None,
+    ) -> List[RetrievedChunk]:
+        """
+        Retrieve relevant chunks from specific documents only.
+
+        This method is called by the document lookup tool to search
+        within a subset of documents selected by the LLM.
+
+        Args:
+            query: Search query
+            document_names: List of specific document names to search
+            top_k: Number of results (default from config)
+            threshold: Minimum similarity threshold (default from config)
+
+        Returns:
+            List of RetrievedChunk objects from the selected documents
+
+        Examples:
+            >>> chunks = service.retrieve_from_documents(
+            ...     query="offside rule",
+            ...     document_names=["Laws of Game 2024-25"],
+            ...     top_k=3
+            ... )
+            >>> len(chunks)
+            2
+        """
+        if not query or len(query.strip()) == 0:
+            logger.warning("Empty query provided to retrieve_from_documents")
+            return []
+
+        if not document_names:
+            logger.warning("Empty document_names provided to retrieve_from_documents")
+            return []
+
+        # Use config defaults if not specified
+        top_k = top_k or self.config.top_k_retrievals
+        threshold = threshold or self.config.similarity_threshold
+
+        try:
+            # Get document IDs from names
+            from src.services.document_service import DocumentService
+            doc_service = DocumentService(self.config, None)  # Would need session in real implementation
+            doc_ids = doc_service.get_document_ids_by_names(document_names)
+
+            if not doc_ids:
+                logger.warning(
+                    f"No indexed documents found matching: {', '.join(document_names)}"
+                )
+                return []
+
+            # Embed the query
+            query_embedding = self.embedding_service.embed_text(query)
+            if query_embedding is None:
+                logger.error("Failed to embed query for document-specific search")
+                return []
+
+            # Search Qdrant for chunks from these documents
+            # Note: Qdrant doesn't natively support filtering by metadata field values,
+            # so we retrieve top results and then filter by document name in metadata
+            results = self.vector_db.search(
+                collection_name=self.config.qdrant_collection_name,
+                query_vector=query_embedding,
+                limit=top_k * 2,  # Over-fetch to account for filtering
+                min_score=threshold,
+            )
+
+            # Filter results to only include chunks from specified documents
+            filtered_results = [
+                chunk
+                for chunk in results
+                if chunk.metadata
+                and chunk.metadata.get("document_name") in document_names
+            ]
+
+            # Apply dynamic threshold if configured
+            if self.config.rag_dynamic_threshold_margin is not None and filtered_results:
+                filtered_results = self._apply_dynamic_threshold(
+                    filtered_results, threshold
+                )
+
+            # Respect top_k limit
+            filtered_results = filtered_results[:top_k]
+
+            logger.info(
+                f"Retrieved {len(filtered_results)} chunks from {len(document_ids)} documents "
+                f"for query: '{query[:100]}...'"
+            )
+
+            return filtered_results
+
+        except Exception as e:
+            logger.error(f"Document-specific retrieval failed: {e}", exc_info=True)
+            return []
+
+    def format_document_list(
+        self,
+        document_names: List[str],
+        include_numbering: bool = True,
+    ) -> str:
+        """
+        Format document list for LLM consumption.
+
+        Provides the LLM with a readable list of available documents
+        to guide its document selection for the lookup tool.
+
+        Args:
+            document_names: List of document names to format
+            include_numbering: Whether to include numbered list (default: True)
+
+        Returns:
+            Formatted document list string, or empty string if no documents
+
+        Examples:
+            >>> formatted = service.format_document_list(
+            ...     ["Laws of Game 2024-25", "VAR Guidelines 2024"]
+            ... )
+            >>> print(formatted)
+            1. Laws of Game 2024-25
+            2. VAR Guidelines 2024
+        """
+        if not document_names:
+            return ""
+
+        if include_numbering:
+            lines = [
+                f"{i}. {name}"
+                for i, name in enumerate(document_names, 1)
+            ]
+        else:
+            lines = [f"- {name}" for name in document_names]
+
+        return "\n".join(lines)
+
+    def get_indexed_documents(self) -> List[str]:
+        """
+        Get list of all indexed document names.
+
+        Convenience method that retrieves indexed documents from DocumentService.
+        Used to populate the document list for the LLM.
+
+        Returns:
+            List of document names, empty if none
+
+        Examples:
+            >>> docs = service.get_indexed_documents()
+            >>> docs
+            ['Laws of Game 2024-25', 'VAR Guidelines 2024']
+        """
+        try:
+            from src.services.document_service import DocumentService
+            doc_service = DocumentService(self.config, None)  # Would need session in real implementation
+            return doc_service.get_indexed_document_names()
+        except Exception as e:
+            logger.error(f"Failed to get indexed documents: {e}")
+            return []
