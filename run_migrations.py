@@ -4,6 +4,24 @@
 import psycopg2
 import os
 import sys
+import re
+
+def split_sql_statements(sql_content):
+    """Split SQL content into individual statements."""
+    # Remove comments and normalize whitespace
+    lines = []
+    for line in sql_content.split('\n'):
+        # Remove SQL comments
+        if '--' in line:
+            line = line[:line.index('--')]
+        line = line.strip()
+        if line:
+            lines.append(line)
+
+    # Join lines and split by semicolon
+    content = ' '.join(lines)
+    statements = [s.strip() for s in content.split(';') if s.strip()]
+    return statements
 
 def run_migrations():
     """Execute all migration files in order."""
@@ -27,8 +45,13 @@ def run_migrations():
             try:
                 with open(migration_file) as f:
                     sql_content = f.read()
-                cursor.execute(sql_content)
-                print(f"✓ Executed {migration_file}")
+
+                # Split and execute individual statements
+                statements = split_sql_statements(sql_content)
+                for stmt in statements:
+                    cursor.execute(stmt)
+
+                print(f"✓ Executed {migration_file} ({len(statements)} statements)")
             except FileNotFoundError:
                 print(f"⚠️  Migration file not found: {migration_file}")
                 continue
