@@ -49,6 +49,9 @@ class RetrievalService:
         Converts query to embedding, searches Qdrant, returns top-K results
         above similarity threshold.
 
+        With dynamic threshold enabled, filters to chunks within a percentage
+        of the best score, but never below static threshold.
+
         Args:
             query: User question or search query
             top_k: Number of results (default from config)
@@ -91,7 +94,7 @@ class RetrievalService:
                 f"mean={sum(query_embedding) / len(query_embedding):.4f})"
             )
 
-            # Search Qdrant
+            # Search Qdrant with higher limit to allow post-filtering with dynamic threshold
             results = self.vector_db.search(
                 collection_name=self.config.qdrant_collection_name,
                 query_vector=query_embedding,
@@ -99,11 +102,16 @@ class RetrievalService:
                 min_score=threshold,
             )
 
+            # Apply dynamic threshold filtering if configured
+            if self.config.rag_dynamic_threshold_margin is not None and results:
+                results = self._apply_dynamic_threshold(results, threshold)
+
             # Log retrieval results with embedding similarity details
             if results:
                 logger.info(
                     f"Retrieved {len(results)} chunks for query "
                     f"(threshold={threshold}, top_k={top_k}, "
+                    f"dynamic_margin={self.config.rag_dynamic_threshold_margin}, "
                     f"scores=[{', '.join(f'{r.score:.4f}' for r in results)}])"
                 )
                 for i, result in enumerate(results, 1):
@@ -123,6 +131,60 @@ class RetrievalService:
         except Exception as e:
             logger.error(f"Retrieval failed: {e}")
             return []
+
+    def _apply_dynamic_threshold(
+        self,
+        chunks: List[RetrievedChunk],
+        static_threshold: float,
+    ) -> List[RetrievedChunk]:
+        """
+        Apply dynamic threshold filtering to retrieved chunks.
+
+        Filters chunks to those within a percentage of the best score,
+        but never below the static threshold. Caps results at 3 chunks.
+
+        Args:
+            chunks: Retrieved chunks from Qdrant
+            static_threshold: Static similarity threshold
+
+        Returns:
+            Filtered list of chunks (max 3)
+
+        Examples:
+            >>> chunks = [
+            ...     RetrievedChunk(score=0.95, ...),
+            ...     RetrievedChunk(score=0.85, ...),
+            ...     RetrievedChunk(score=0.70, ...),
+            ... ]
+            >>> filtered = service._apply_dynamic_threshold(chunks, 0.7)
+            >>> len(filtered) <= 3
+            True
+        """
+        if not chunks:
+            return []
+
+        best_score = chunks[0].score
+        dynamic_threshold = best_score * (1 - self.config.rag_dynamic_threshold_margin)
+        effective_threshold = max(dynamic_threshold, static_threshold)
+
+        logger.debug(
+            f"Dynamic threshold calculation: "
+            f"best_score={best_score:.4f}, "
+            f"margin={self.config.rag_dynamic_threshold_margin}, "
+            f"dynamic_threshold={dynamic_threshold:.4f}, "
+            f"static_threshold={static_threshold:.4f}, "
+            f"effective_threshold={effective_threshold:.4f}"
+        )
+
+        filtered = [chunk for chunk in chunks if chunk.score >= effective_threshold]
+        result = filtered[:3]  # Cap at 3 chunks
+
+        logger.debug(
+            f"Dynamic threshold filtered {len(chunks)} chunks to {len(result)} "
+            f"(effective_threshold={effective_threshold:.4f})"
+        )
+
+        return result
 
     def format_context(
         self,

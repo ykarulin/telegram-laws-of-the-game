@@ -2,6 +2,7 @@
 import os
 from enum import Enum
 from dataclasses import dataclass
+from typing import Optional
 from dotenv import load_dotenv
 from src.exceptions import ConfigError
 
@@ -39,6 +40,7 @@ class Config:
     embedding_batch_size: int = None
     top_k_retrievals: int = None
     similarity_threshold: float = None
+    rag_dynamic_threshold_margin: Optional[float] = None
 
     def __post_init__(self) -> None:
         """Validate configuration values after initialization."""
@@ -61,6 +63,12 @@ class Config:
             raise ConfigError(
                 f"top_k_retrievals must be at least 1, got {self.top_k_retrievals}"
             )
+
+        if self.rag_dynamic_threshold_margin is not None:
+            if not 0.0 <= self.rag_dynamic_threshold_margin <= 1.0:
+                raise ConfigError(
+                    f"rag_dynamic_threshold_margin must be between 0.0 and 1.0, got {self.rag_dynamic_threshold_margin}"
+                )
 
         if self.qdrant_port <= 0 or self.qdrant_port > 65535:
             raise ConfigError(
@@ -138,6 +146,7 @@ class Config:
             embedding_batch_size=int(os.getenv("EMBEDDING_BATCH_SIZE", "100")),
             top_k_retrievals=int(os.getenv("TOP_K_RETRIEVALS", "5")),
             similarity_threshold=float(os.getenv("SIMILARITY_THRESHOLD", "0.7")),
+            rag_dynamic_threshold_margin=float(os.getenv("RAG_DYNAMIC_THRESHOLD_MARGIN")) if os.getenv("RAG_DYNAMIC_THRESHOLD_MARGIN") else None,
         )
 
 
