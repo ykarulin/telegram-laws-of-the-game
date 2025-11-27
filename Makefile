@@ -1,4 +1,4 @@
-.PHONY: help install test test-cov run run-dev run-testing run-prod docker-build docker-up docker-down clean sync-documents list-documents reset-embeddings reset-embeddings-dev reset-embeddings-testing reset-embeddings-prod
+.PHONY: help install test test-cov run run-dev run-testing run-prod docker-build docker-up docker-down clean sync-documents list-documents reset-embeddings reset-embeddings-dev reset-embeddings-testing reset-embeddings-prod migrate migrate-prod
 
 help:
 	@echo "Football Rules Expert Bot - Available commands:"
@@ -7,6 +7,10 @@ help:
 	@echo "  make install        - Install dependencies in venv"
 	@echo "  make test           - Run tests"
 	@echo "  make test-cov       - Run tests with coverage report"
+	@echo ""
+	@echo "Database:"
+	@echo "  make migrate        - Run database migrations (development/testing)"
+	@echo "  make migrate-prod   - Run database migrations (production)"
 	@echo ""
 	@echo "Local Run (using ENVIRONMENT env var):"
 	@echo "  make run            - Run bot (uses .env.development by default)"
@@ -95,6 +99,16 @@ docker-logs-qdrant:
 docker-logs-postgres:
 	docker compose logs -f postgres
 
+migrate:
+	@echo "Running database migrations..."
+	@echo "Make sure PostgreSQL is running and DATABASE_URL is set in .env"
+	bash -c 'source venv/bin/activate && python3 -c "import psycopg2; conn = psycopg2.connect(\"{$DATABASE_URL}\"); cursor = conn.cursor(); files = [\"migrations/001_initial_schema.sql\", \"migrations/002_add_documents_table.sql\", \"migrations/003_add_relative_path_to_documents.sql\"]; [cursor.execute(open(f).read()) for f in files]; conn.commit(); cursor.close(); conn.close(); print(\"✅ Migrations completed!\")"'
+
+migrate-prod:
+	@echo "⚠️  Running database migrations on PRODUCTION..."
+	@echo "Make sure PostgreSQL is running and DATABASE_URL is set in .env.production"
+	bash -c 'source venv/bin/activate && set -a && source .env.production && set +a && python3 -c "import psycopg2; conn = psycopg2.connect(\"{$DATABASE_URL}\"); cursor = conn.cursor(); files = [\"migrations/001_initial_schema.sql\", \"migrations/002_add_documents_table.sql\", \"migrations/003_add_relative_path_to_documents.sql\"]; [cursor.execute(open(f).read()) for f in files]; conn.commit(); cursor.close(); conn.close(); print(\"✅ Migrations completed!\")"'
+
 sync-documents:
 	bash -c 'source venv/bin/activate && set -a && source .env.development && set +a && python -m src.cli.document_sync'
 
@@ -130,16 +144,16 @@ reset-embeddings-dev:
 	@echo "This will:"
 	@echo "  1. Delete all documents from PostgreSQL (development database)"
 	@echo "  2. Clear all embeddings from Qdrant"
-	@echo "  3. Move all files from knowledgebase/indexed → knowledgebase/upload"
+	@echo "  3. Move all files from knowledgebase/indexed → knowledgebase/upload (preserving folder structure)"
 	@echo "  4. Reset sync state file"
 	@echo "  5. Re-run document sync to re-embed with new model"
 	@echo ""
 	@read -p "Type 'yes' to confirm: " confirm; \
 	if [ "$$confirm" = "yes" ]; then \
 		bash -c 'source venv/bin/activate && set -a && source .env.development && set +a && python -c "from src.cli.document_commands import DocumentCLI; from src.config import Config; cli = DocumentCLI(Config.from_env()); cli.delete_all_documents(force=True); cli.close()"'; \
-		find knowledgebase/indexed -type f -not -name ".DS_Store" -not -name ".gitkeep" | xargs -I {} mv {} knowledgebase/upload/ 2>/dev/null || echo "No indexed files to move"; \
+		bash -c 'find knowledgebase/indexed -type f -not -name ".DS_Store" -not -name ".gitkeep" -print0 | while IFS= read -r -d "" file; do dir=$$(dirname "$$file" | sed "s|knowledgebase/indexed/||"); mkdir -p "knowledgebase/upload/$$dir"; mv "$$file" "knowledgebase/upload/$$dir"; done 2>/dev/null || echo "No indexed files to move"'; \
 		rm -f knowledgebase/.sync_state.development.json; \
-		echo "✅ Databases cleared and files moved."; \
+		echo "✅ Databases cleared and files moved (structure preserved)."; \
 		echo "🔄 Re-syncing documents with new embeddings..."; \
 		bash -c 'source venv/bin/activate && set -a && source .env.development && set +a && python -m src.cli.document_sync'; \
 		echo "✅ Re-embedding complete!"; \
@@ -152,16 +166,16 @@ reset-embeddings-testing:
 	@echo "This will:"
 	@echo "  1. Delete all documents from PostgreSQL (testing database)"
 	@echo "  2. Clear all embeddings from Qdrant"
-	@echo "  3. Move all files from knowledgebase/indexed → knowledgebase/upload"
+	@echo "  3. Move all files from knowledgebase/indexed → knowledgebase/upload (preserving folder structure)"
 	@echo "  4. Reset sync state file"
 	@echo "  5. Re-run document sync to re-embed with new model"
 	@echo ""
 	@read -p "Type 'yes' to confirm: " confirm; \
 	if [ "$$confirm" = "yes" ]; then \
 		bash -c 'source venv/bin/activate && set -a && source .env.testing && set +a && python -c "from src.cli.document_commands import DocumentCLI; from src.config import Config; cli = DocumentCLI(Config.from_env()); cli.delete_all_documents(force=True); cli.close()"'; \
-		find knowledgebase/indexed -type f -not -name ".DS_Store" -not -name ".gitkeep" | xargs -I {} mv {} knowledgebase/upload/ 2>/dev/null || echo "No indexed files to move"; \
+		bash -c 'find knowledgebase/indexed -type f -not -name ".DS_Store" -not -name ".gitkeep" -print0 | while IFS= read -r -d "" file; do dir=$$(dirname "$$file" | sed "s|knowledgebase/indexed/||"); mkdir -p "knowledgebase/upload/$$dir"; mv "$$file" "knowledgebase/upload/$$dir"; done 2>/dev/null || echo "No indexed files to move"'; \
 		rm -f knowledgebase/.sync_state.testing.json; \
-		echo "✅ Databases cleared and files moved."; \
+		echo "✅ Databases cleared and files moved (structure preserved)."; \
 		echo "🔄 Re-syncing documents with new embeddings..."; \
 		bash -c 'source venv/bin/activate && set -a && source .env.testing && set +a && python -m src.cli.document_sync'; \
 		echo "✅ Re-embedding complete!"; \
@@ -174,16 +188,16 @@ reset-embeddings-prod:
 	@echo "This will:"
 	@echo "  1. Delete all documents from PostgreSQL (production database)"
 	@echo "  2. Clear all embeddings from Qdrant"
-	@echo "  3. Move all files from knowledgebase/indexed → knowledgebase/upload"
+	@echo "  3. Move all files from knowledgebase/indexed → knowledgebase/upload (preserving folder structure)"
 	@echo "  4. Reset sync state file"
 	@echo "  5. Re-run document sync to re-embed with new model"
 	@echo ""
 	@read -p "Type 'yes-prod' to confirm for PRODUCTION: " confirm; \
 	if [ "$$confirm" = "yes-prod" ]; then \
 		bash -c 'source venv/bin/activate && set -a && source .env.production && set +a && python -c "from src.cli.document_commands import DocumentCLI; from src.config import Config; cli = DocumentCLI(Config.from_env()); cli.delete_all_documents(force=True); cli.close()"'; \
-		find knowledgebase/indexed -type f -not -name ".DS_Store" -not -name ".gitkeep" | xargs -I {} mv {} knowledgebase/upload/ 2>/dev/null || echo "No indexed files to move"; \
+		bash -c 'find knowledgebase/indexed -type f -not -name ".DS_Store" -not -name ".gitkeep" -print0 | while IFS= read -r -d "" file; do dir=$$(dirname "$$file" | sed "s|knowledgebase/indexed/||"); mkdir -p "knowledgebase/upload/$$dir"; mv "$$file" "knowledgebase/upload/$$dir"; done 2>/dev/null || echo "No indexed files to move"'; \
 		rm -f knowledgebase/.sync_state.production.json; \
-		echo "✅ Databases cleared and files moved."; \
+		echo "✅ Databases cleared and files moved (structure preserved)."; \
 		echo "🔄 Re-syncing documents with new embeddings..."; \
 		bash -c 'source venv/bin/activate && set -a && source .env.production && set +a && python -m src.cli.document_sync'; \
 		echo "✅ Re-embedding complete!"; \
