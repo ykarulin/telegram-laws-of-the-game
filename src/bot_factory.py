@@ -35,7 +35,8 @@ def create_application(config: Config) -> Application:
             api_key=config.openai_api_key,
             model=config.embedding_model
         )
-        retrieval_service = RetrievalService(config, embedding_service)
+        db_session = db.SessionLocal()
+        retrieval_service = RetrievalService(config, embedding_service, db_session)
         logger.info("RAG services initialized (embedding + retrieval)")
     except Exception as e:
         logger.warning(f"Failed to initialize RAG services: {e}. Bot will run without document retrieval.")

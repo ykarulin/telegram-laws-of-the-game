@@ -42,9 +42,11 @@ class EmbeddingDebugger:
         """Initialize debugger with config and services."""
         self.config = load_config()
         self.embedding_service = EmbeddingService()
+        # Debug script doesn't use document-specific retrieval, so pass None for db_session
         self.retrieval_service = RetrievalService(
             self.config,
-            self.embedding_service
+            self.embedding_service,
+            db_session=None
         )
         self.vector_db = self.retrieval_service.vector_db
 

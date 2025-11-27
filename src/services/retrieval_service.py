@@ -11,6 +11,7 @@ Handles:
 import logging
 from typing import List, Dict, Any, Optional
 
+from sqlalchemy.orm import Session
 from src.services.embedding_service import EmbeddingService
 from src.core.vector_db import VectorDatabase, RetrievedChunk
 from src.config import Config
@@ -21,16 +22,18 @@ logger = logging.getLogger(__name__)
 class RetrievalService:
     """Retrieve and format context from vector database."""
 
-    def __init__(self, config: Config, embedding_service: EmbeddingService):
+    def __init__(self, config: Config, embedding_service: EmbeddingService, db_session: Optional[Session] = None):
         """
         Initialize retrieval service.
 
         Args:
             config: Configuration object with Qdrant settings
             embedding_service: EmbeddingService for query embedding
+            db_session: SQLAlchemy database session for document service operations
         """
         self.config = config
         self.embedding_service = embedding_service
+        self.db_session = db_session
         self.vector_db = VectorDatabase(
             host=config.qdrant_host,
             port=config.qdrant_port,
@@ -439,7 +442,7 @@ class RetrievalService:
         try:
             # Get document IDs from names
             from src.services.document_service import DocumentService
-            doc_service = DocumentService(self.config, None)  # Would need session in real implementation
+            doc_service = DocumentService(self.config, self.db_session)
             doc_ids = doc_service.get_document_ids_by_names(document_names)
 
             if not doc_ids:
@@ -561,7 +564,7 @@ class RetrievalService:
         """
         try:
             from src.services.document_service import DocumentService
-            doc_service = DocumentService(self.config, None)  # Would need session in real implementation
+            doc_service = DocumentService(self.config, self.db_session)
             return doc_service.get_indexed_document_names()
         except Exception as e:
             logger.error(f"Failed to get indexed documents: {e}")
