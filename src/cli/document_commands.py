@@ -324,7 +324,10 @@ class DocumentCLI:
 
             # Embed chunks
             print("\nEmbedding chunks...")
-            embedded_chunks = self.embedding_service.embed_chunks(chunks)
+            embedded_chunks = self.embedding_service.embed_chunks(
+                chunks,
+                batch_size=self.config.embedding_batch_size
+            )
             print(f"✓ Embedded {len(embedded_chunks)} chunks")
 
             if not embedded_chunks:
