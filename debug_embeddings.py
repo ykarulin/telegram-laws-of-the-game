@@ -23,7 +23,7 @@ import sys
 from typing import List, Dict, Any, Optional
 from pathlib import Path
 
-from src.config import Config
+from src.config import load_config
 from src.services.embedding_service import EmbeddingService
 from src.services.retrieval_service import RetrievalService
 from src.core.vector_db import VectorDatabase
@@ -40,7 +40,7 @@ class EmbeddingDebugger:
 
     def __init__(self):
         """Initialize debugger with config and services."""
-        self.config = Config()
+        self.config = load_config()
         self.embedding_service = EmbeddingService()
         self.retrieval_service = RetrievalService(
             self.config,
@@ -190,26 +190,30 @@ class EmbeddingDebugger:
             point_count = collection_info['point_count']
             print(f"Total points in collection: {point_count}")
 
-            # Scroll through all points
-            from qdrant_client.models import PointIdsList
-
             all_points = []
             offset = 0
             batch_size = 100
             exported = 0
 
             while offset < point_count and (limit is None or exported < limit):
-                # Scroll points
+                # Scroll points - returns (points, next_page_offset)
                 scroll_result = self.vector_db.client.scroll(
                     collection_name=self.config.qdrant_collection_name,
                     limit=batch_size,
                     offset=offset,
                 )
 
-                if not scroll_result.points:
+                # Handle both tuple and object responses
+                if isinstance(scroll_result, tuple):
+                    points, next_offset = scroll_result
+                else:
+                    points = scroll_result.points
+                    next_offset = None
+
+                if not points:
                     break
 
-                for point in scroll_result.points:
+                for point in points:
                     if limit and exported >= limit:
                         break
 
@@ -220,7 +224,10 @@ class EmbeddingDebugger:
                     all_points.append(doc)
                     exported += 1
 
-                offset += batch_size
+                if next_offset is None or next_offset == offset:
+                    break
+                offset = next_offset or (offset + batch_size)
+
                 print(f"  Exported {exported}/{min(point_count, limit or point_count)} documents",
                       end='\r')
 
@@ -236,6 +243,8 @@ class EmbeddingDebugger:
 
         except Exception as e:
             print(f"ERROR: Failed to export collection: {e}")
+            import traceback
+            traceback.print_exc()
             return 0
 
     def find_documents_by_content(
@@ -258,8 +267,6 @@ class EmbeddingDebugger:
         print(f"{'='*80}")
 
         try:
-            # Scroll through all points
-            all_points = []
             offset = 0
             batch_size = 100
 
@@ -277,10 +284,17 @@ class EmbeddingDebugger:
                     offset=offset,
                 )
 
-                if not scroll_result.points:
+                # Handle both tuple and object responses
+                if isinstance(scroll_result, tuple):
+                    points, next_offset = scroll_result
+                else:
+                    points = scroll_result.points
+                    next_offset = None
+
+                if not points:
                     break
 
-                for point in scroll_result.points:
+                for point in points:
                     text = point.payload.get('text', '').lower()
                     if search_text.lower() in text:
                         matches.append({
@@ -295,7 +309,9 @@ class EmbeddingDebugger:
                 if len(matches) >= limit:
                     break
 
-                offset += batch_size
+                if next_offset is None or next_offset == offset:
+                    break
+                offset = next_offset or (offset + batch_size)
 
             print(f"Found {len(matches)} matching documents:")
             for i, match in enumerate(matches, 1):
@@ -309,6 +325,8 @@ class EmbeddingDebugger:
 
         except Exception as e:
             print(f"ERROR: Search failed: {e}")
+            import traceback
+            traceback.print_exc()
             return []
 
     def _calculate_std_dev(self, values: List[float]) -> float:
