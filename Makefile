@@ -188,7 +188,6 @@ reset-embeddings-prod:
 	@echo "  2. Clear all embeddings from Qdrant"
 	@echo "  3. Move all files from knowledgebase/indexed → knowledgebase/upload (preserving folder structure)"
 	@echo "  4. Reset sync state file"
-	@echo "  5. Re-run document sync to re-embed with new model"
 	@echo ""
 	@read -p "Type 'yes-prod' to confirm for PRODUCTION: " confirm; \
 	if [ "$$confirm" = "yes-prod" ]; then \
@@ -196,9 +195,9 @@ reset-embeddings-prod:
 		bash -c 'find knowledgebase/indexed -type f -not -name ".DS_Store" -not -name ".gitkeep" -print0 | while IFS= read -r -d "" file; do dir=$$(dirname "$$file" | sed "s|knowledgebase/indexed/||"); mkdir -p "knowledgebase/upload/$$dir"; mv "$$file" "knowledgebase/upload/$$dir"; done 2>/dev/null || echo "No indexed files to move"'; \
 		rm -f knowledgebase/.sync_state.production.json; \
 		echo "✅ Databases cleared and files moved (structure preserved)."; \
-		echo "🔄 Re-syncing documents with new embeddings..."; \
-		bash -c 'source venv/bin/activate && set -a && source .env.production && set +a && python -m src.cli.document_sync'; \
-		echo "✅ Re-embedding complete!"; \
+		echo ""; \
+		echo "To re-sync documents, run:"; \
+		echo "  make sync-documents-prod"; \
 	else \
 		echo "❌ Cancelled."; \
 	fi
