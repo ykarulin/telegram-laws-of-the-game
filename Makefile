@@ -101,13 +101,11 @@ docker-logs-postgres:
 
 migrate:
 	@echo "Running database migrations..."
-	@echo "Make sure PostgreSQL is running and DATABASE_URL is set in .env"
-	bash -c 'source venv/bin/activate && set -a && source .env.development && set +a && python3 << "PYTHON_EOF"\nimport psycopg2\nimport os\n\nconn = psycopg2.connect(os.environ.get("DATABASE_URL"))\nconn.autocommit = True\ncursor = conn.cursor()\n\nfiles = ["migrations/001_initial_schema.sql", "migrations/002_add_documents_table.sql", "migrations/003_add_relative_path_to_documents.sql"]\nfor f in files:\n    with open(f) as sql_file:\n        cursor.execute(sql_file.read())\n    print(f"✓ Executed {f}")\n\ncursor.close()\nconn.close()\nprint("✅ Migrations completed!")\nPYTHON_EOF\n'
+	bash -c 'source venv/bin/activate && set -a && source .env.development && set +a && python3 run_migrations.py'
 
 migrate-prod:
 	@echo "⚠️  Running database migrations on PRODUCTION..."
-	@echo "Make sure PostgreSQL is running and DATABASE_URL is set in .env.production"
-	bash -c 'source venv/bin/activate && set -a && source .env.production && set +a && python3 << "PYTHON_EOF"\nimport psycopg2\nimport os\n\nconn = psycopg2.connect(os.environ.get("DATABASE_URL"))\nconn.autocommit = True\ncursor = conn.cursor()\n\nfiles = ["migrations/001_initial_schema.sql", "migrations/002_add_documents_table.sql", "migrations/003_add_relative_path_to_documents.sql"]\nfor f in files:\n    with open(f) as sql_file:\n        cursor.execute(sql_file.read())\n    print(f"✓ Executed {f}")\n\ncursor.close()\nconn.close()\nprint("✅ Migrations completed!")\nPYTHON_EOF\n'
+	bash -c 'source venv/bin/activate && set -a && source .env.production && set +a && python3 run_migrations.py'
 
 sync-documents:
 	bash -c 'source venv/bin/activate && set -a && source .env.development && set +a && python -m src.cli.document_sync'
