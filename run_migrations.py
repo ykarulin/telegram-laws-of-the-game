@@ -4,7 +4,6 @@
 import psycopg2
 import os
 import sys
-import re
 
 def split_sql_statements(sql_content):
     """Split SQL content into individual statements."""
@@ -49,7 +48,18 @@ def run_migrations():
                 # Split and execute individual statements
                 statements = split_sql_statements(sql_content)
                 for stmt in statements:
-                    cursor.execute(stmt)
+                    try:
+                        cursor.execute(stmt)
+                    except psycopg2.Error as e:
+                        # Skip "already exists" errors for idempotent operations
+                        error_msg = str(e).lower()
+                        if "already exists" in error_msg or "duplicate key" in error_msg:
+                            print(f"  ⚠️  Skipped (already exists): {stmt[:50]}...")
+                            conn.rollback()
+                            cursor = conn.cursor()
+                            continue
+                        else:
+                            raise
 
                 print(f"✓ Executed {migration_file} ({len(statements)} statements)")
             except FileNotFoundError:
@@ -57,6 +67,7 @@ def run_migrations():
                 continue
             except psycopg2.Error as e:
                 print(f"✗ Error executing {migration_file}: {e}")
+                print(f"   (This may indicate a partially migrated or corrupted schema)")
                 sys.exit(1)
 
         cursor.close()
