@@ -102,12 +102,12 @@ docker-logs-postgres:
 migrate:
 	@echo "Running database migrations..."
 	@echo "Make sure PostgreSQL is running and DATABASE_URL is set in .env"
-	bash -c 'source venv/bin/activate && python3 -c "import psycopg2; conn = psycopg2.connect(\"{$DATABASE_URL}\"); cursor = conn.cursor(); files = [\"migrations/001_initial_schema.sql\", \"migrations/002_add_documents_table.sql\", \"migrations/003_add_relative_path_to_documents.sql\"]; [cursor.execute(open(f).read()) for f in files]; conn.commit(); cursor.close(); conn.close(); print(\"✅ Migrations completed!\")"'
+	bash -c 'source venv/bin/activate && set -a && source .env.development && set +a && python3 -c "import psycopg2; conn = psycopg2.connect(\"$$DATABASE_URL\"); cursor = conn.cursor(); files = [\"migrations/001_initial_schema.sql\", \"migrations/002_add_documents_table.sql\", \"migrations/003_add_relative_path_to_documents.sql\"]; [cursor.execute(open(f).read()) for f in files]; conn.commit(); cursor.close(); conn.close(); print(\"✅ Migrations completed!\")"'
 
 migrate-prod:
 	@echo "⚠️  Running database migrations on PRODUCTION..."
 	@echo "Make sure PostgreSQL is running and DATABASE_URL is set in .env.production"
-	bash -c 'source venv/bin/activate && set -a && source .env.production && set +a && python3 -c "import psycopg2; conn = psycopg2.connect(\"{$DATABASE_URL}\"); cursor = conn.cursor(); files = [\"migrations/001_initial_schema.sql\", \"migrations/002_add_documents_table.sql\", \"migrations/003_add_relative_path_to_documents.sql\"]; [cursor.execute(open(f).read()) for f in files]; conn.commit(); cursor.close(); conn.close(); print(\"✅ Migrations completed!\")"'
+	bash -c 'source venv/bin/activate && set -a && source .env.production && set +a && python3 -c "import psycopg2; conn = psycopg2.connect(\"$$DATABASE_URL\"); cursor = conn.cursor(); files = [\"migrations/001_initial_schema.sql\", \"migrations/002_add_documents_table.sql\", \"migrations/003_add_relative_path_to_documents.sql\"]; [cursor.execute(open(f).read()) for f in files]; conn.commit(); cursor.close(); conn.close(); print(\"✅ Migrations completed!\")"'
 
 sync-documents:
 	bash -c 'source venv/bin/activate && set -a && source .env.development && set +a && python -m src.cli.document_sync'
