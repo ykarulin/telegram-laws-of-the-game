@@ -98,7 +98,7 @@ async def test_handle_message_sends_typing_indicator(message_handler, mock_updat
     import time
 
     # Mock the generate_response to take some time (run in executor, so synchronous)
-    def slow_generate(message, conversation_context=None):
+    def slow_generate(message, conversation_context=None, system_prompt=None, tools=None):
         time.sleep(0.15)  # Sleep for 150ms - long enough for at least 1 typing indicator
         return "This is a test response."
 

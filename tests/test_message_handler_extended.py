@@ -234,7 +234,7 @@ class TestMessageHandlerExtended:
     @pytest.mark.asyncio
     async def test_handle_typing_indicator_timing(self, mock_llm_client, mock_database, mock_config, mock_update, mock_context):
         """Test typing indicator is sent with proper timing."""
-        def slow_generate(message, conversation_context=None):
+        def slow_generate(message, conversation_context=None, system_prompt=None, tools=None):
             import time
             time.sleep(0.1)
             return "Response"

@@ -322,7 +322,11 @@ class MessageHandler:
         Returns:
             Generated response text (possibly with citations appended)
         """
-        # Log available documents if tool is enabled
+        # Prepare system prompt and tools for LLM
+        system_prompt = None
+        tools = None
+
+        # If document selection is enabled, use enhanced prompt and tools
         if self.document_lookup_tool:
             available_docs = self._get_available_documents()
             if available_docs:
@@ -330,6 +334,21 @@ class MessageHandler:
                     f"Documents supplied to model for intelligent selection: {len(available_docs)} total. "
                     f"Available documents: {', '.join(available_docs)}"
                 )
+
+                # Prepare document list for prompt
+                document_context = self._prepare_document_context(available_docs)
+
+                # Use enhanced system prompt with document selection instructions
+                system_prompt = get_system_prompt_with_document_selection(
+                    document_list=document_context,
+                    max_lookups=self.config.max_document_lookups,
+                    max_chunks=self.config.lookup_max_chunks,
+                    similarity_threshold=self.config.similarity_threshold,
+                )
+
+                # Add tool schema for OpenAI function calling
+                tools = [self.document_lookup_tool.get_tool_schema()]
+                logger.info("Document selection tool wired into LLM request")
 
         # Prepare augmented context combining conversation history and documents
         augmented_context: Optional[List[Dict[str, str]]] = None
@@ -359,7 +378,9 @@ class MessageHandler:
             None,
             self.llm_client.generate_response,
             user_text,
-            augmented_context
+            augmented_context,
+            system_prompt,
+            tools,
         )
         debug_log_llm_response(logger, len(bot_response))
 

@@ -143,7 +143,13 @@ class LLMClient:
         self.use_completion_tokens = any(model.startswith(m) for m in self.MODELS_WITH_COMPLETION_TOKENS)
         logger.info(f"LLM initialized with model: {self.model}, temperature: {self.temperature}")
 
-    def generate_response(self, user_message: str, conversation_context: list = None) -> str:
+    def generate_response(
+        self,
+        user_message: str,
+        conversation_context: list = None,
+        system_prompt: str = None,
+        tools: list = None,
+    ) -> str:
         """Generate a response using OpenAI API.
 
         Args:
@@ -151,6 +157,8 @@ class LLMClient:
             conversation_context: Optional list of previous messages in conversation.
                                  Each item should be a dict with 'role' and 'content' keys.
                                  Will be inserted between system prompt and current user message.
+            system_prompt: Optional custom system prompt. If None, uses default get_system_prompt()
+            tools: Optional list of tool definitions for function calling (OpenAI format)
 
         Returns:
             Generated response text, truncated to Telegram limit if necessary
@@ -161,8 +169,10 @@ class LLMClient:
         try:
             logger.debug(f"Generating response for: {user_message[:50]}...")
 
-            # Build the messages list with current datetime in system prompt
-            messages = [{"role": "system", "content": get_system_prompt()}]
+            # Build the messages list with system prompt
+            if system_prompt is None:
+                system_prompt = get_system_prompt()
+            messages = [{"role": "system", "content": system_prompt}]
 
             # Add conversation context if provided
             if conversation_context:
@@ -178,6 +188,11 @@ class LLMClient:
                 "messages": messages,
                 "temperature": self.temperature,
             }
+
+            # Add tools if provided
+            if tools:
+                request_params["tools"] = tools
+                logger.debug(f"Added {len(tools)} tool definitions to request")
 
             # Use the correct parameter name based on model
             if self.use_completion_tokens:
