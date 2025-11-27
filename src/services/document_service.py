@@ -50,7 +50,7 @@ class DocumentContent:
     source_url: Optional[str]
     uploaded_by: Optional[str]
     uploaded_at: datetime
-    metadata: Optional[Dict[str, Any]]
+    document_metadata: Optional[Dict[str, Any]]
     qdrant_status: str
     qdrant_collection_id: Optional[str]
     error_message: Optional[str]
@@ -133,7 +133,7 @@ class DocumentService:
                 content=content,
                 source_url=source_url.strip() if source_url else None,
                 uploaded_by=uploaded_by.strip() if uploaded_by else None,
-                metadata=metadata,  # SQLAlchemy JSON column handles serialization
+                document_metadata=metadata,  # SQLAlchemy JSON column handles serialization
                 relative_path=relative_path.strip() if relative_path else None,
                 qdrant_status='pending',
             )
@@ -186,7 +186,7 @@ class DocumentService:
                 source_url=model.source_url,
                 uploaded_by=model.uploaded_by,
                 uploaded_at=model.uploaded_at,
-                metadata=model.metadata,
+                document_metadata=model.document_metadata,
                 qdrant_status=model.qdrant_status,
                 qdrant_collection_id=model.qdrant_collection_id,
                 error_message=model.error_message,

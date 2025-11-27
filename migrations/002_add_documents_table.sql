@@ -36,7 +36,7 @@ COMMENT ON COLUMN documents.version IS 'Document version (e.g., 2024-25, 2024-20
 COMMENT ON COLUMN documents.content IS 'Full extracted text content from the document';
 COMMENT ON COLUMN documents.source_url IS 'Original URL where document was obtained';
 COMMENT ON COLUMN documents.uploaded_by IS 'User or system that uploaded the document';
-COMMENT ON COLUMN documents.metadata IS 'Additional metadata (language, pages, author, etc.)';
+-- COMMENT MOVED TO MIGRATION 004 WHERE COLUMN IS RENAMED
 COMMENT ON COLUMN documents.qdrant_status IS 'Indexing status: pending, indexed, or failed';
 COMMENT ON COLUMN documents.qdrant_collection_id IS 'ID of Qdrant collection containing this document''s chunks';
 COMMENT ON COLUMN documents.error_message IS 'Error details if indexing failed';

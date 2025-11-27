@@ -46,7 +46,7 @@ class DocumentModel(Base):
     source_url = Column(String(512), nullable=True)
     uploaded_by = Column(String(255), nullable=True)
     uploaded_at = Column(DateTime, default=datetime.utcnow, nullable=False, index=True)
-    metadata = Column(JSON, nullable=True)
+    document_metadata = Column(JSON, nullable=True)
     qdrant_status = Column(String(20), nullable=False, default='pending', index=True)
     qdrant_collection_id = Column(String(255), nullable=True)
     error_message = Column(Text, nullable=True)

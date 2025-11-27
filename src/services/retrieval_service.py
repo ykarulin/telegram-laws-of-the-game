@@ -519,10 +519,13 @@ class RetrievalService:
         threshold = threshold or self.config.similarity_threshold
 
         try:
-            # Get document IDs from names
+            # Get document IDs from names (with fresh session)
             from src.services.document_service import DocumentService
-            doc_service = DocumentService(self.config, self.db_session)
-            doc_ids = doc_service.get_document_ids_by_names(document_names)
+            from src.core.db import ConversationDatabase
+            db = ConversationDatabase(self.config.database_url)
+            with db.get_session() as session:
+                doc_service = DocumentService(self.config, session)
+                doc_ids = doc_service.get_document_ids_by_names(document_names)
 
             if not doc_ids:
                 logger.warning(

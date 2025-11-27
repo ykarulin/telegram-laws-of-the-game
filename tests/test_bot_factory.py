@@ -106,10 +106,12 @@ class TestBotFactory:
 
                         create_application(mock_config)
 
-                        mock_retrieval_class.assert_called_once_with(
-                            mock_config,
-                            mock_embed_instance
-                        )
+                        # Verify RetrievalService was called with config, embedding service, session, and feature registry
+                        assert mock_retrieval_class.called
+                        call_args = mock_retrieval_class.call_args
+                        assert call_args[0][0] == mock_config  # config
+                        assert call_args[0][1] == mock_embed_instance  # embedding_service
+                        # args[2] is db_session and args[3] is feature_registry (both are mocks)
 
     def test_create_application_handles_embedding_service_error(self, mock_config):
         """Test graceful handling when embedding service fails."""
@@ -468,7 +470,8 @@ class TestBotFactoryFeatureRegistry:
             with patch("src.bot_factory.ConversationDatabase"):
                 with patch("src.bot_factory.EmbeddingService"):
                     with patch("src.bot_factory.RetrievalService"):
-                        with patch("src.bot_factory.logger") as mock_logger:
+                        # Patch the logger in features.py where log_summary logs from
+                        with patch("src.core.features.logger") as mock_logger:
                             create_application(mock_config_with_features)
 
                             # Verify summary logging was called

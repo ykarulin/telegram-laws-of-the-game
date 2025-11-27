@@ -27,6 +27,7 @@ def mock_config():
     config.qdrant_api_key = None
     config.qdrant_collection_name = "documents"
     config.rag_dynamic_threshold_margin = 0.15  # 15% margin
+    config.database_url = "postgresql://test"  # For database operations
     return config
 
 
@@ -245,18 +246,25 @@ class TestDocumentSpecificRetrieval:
 
         requested_top_k = 3
 
-        # Mock the document service to return valid doc IDs
+        # Mock the document service and database to return valid doc IDs
         with patch('src.services.document_service.DocumentService') as mock_doc_service_class:
-            mock_doc_service = MagicMock()
-            mock_doc_service_class.return_value = mock_doc_service
-            mock_doc_service.get_document_ids_by_names.return_value = ["doc_id_1"]
+            with patch('src.core.db.ConversationDatabase') as mock_db_class:
+                mock_doc_service = MagicMock()
+                mock_doc_service_class.return_value = mock_doc_service
+                mock_doc_service.get_document_ids_by_names.return_value = {"Requested Doc": 1}
 
-            results = retrieval_service.retrieve_from_documents(
-                query="test",
-                document_names=["Requested Doc"],
-                top_k=requested_top_k,
-                threshold=0.7
-            )
+                mock_db = MagicMock()
+                mock_db_class.return_value = mock_db
+                mock_session = MagicMock()
+                mock_db.get_session.return_value.__enter__ = MagicMock(return_value=mock_session)
+                mock_db.get_session.return_value.__exit__ = MagicMock(return_value=None)
+
+                results = retrieval_service.retrieve_from_documents(
+                    query="test",
+                    document_names=["Requested Doc"],
+                    top_k=requested_top_k,
+                    threshold=0.7
+                )
 
             # Verify over-fetching was used (limit should be > top_k)
             call_kwargs = mock_vector_db.search.call_args[1]

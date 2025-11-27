@@ -144,7 +144,7 @@ class TestDocumentUpload:
         assert doc.source_url == "https://example.com/faq"
         assert doc.uploaded_by == "admin@example.com"
         assert doc.relative_path == relative_path
-        assert doc.metadata == metadata
+        assert doc.document_metadata == metadata
         assert doc.qdrant_status == "pending"
 
 
@@ -410,6 +410,6 @@ class TestMetadataPreservation:
         )
 
         doc = doc_service.get_document(doc_id)
-        assert doc.metadata == metadata
+        assert doc.document_metadata == metadata
         assert doc.relative_path == relative_path
         assert doc.name == "Full Laws"
