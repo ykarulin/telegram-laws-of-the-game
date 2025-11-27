@@ -10,13 +10,13 @@ CREATE TABLE IF NOT EXISTS documents (
     content TEXT,  -- Full document text after extraction
     source_url VARCHAR(512),
     uploaded_by VARCHAR(255),
-    uploaded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    uploaded_at TIMESTAMP DEFAULT (CURRENT_TIMESTAMP AT TIME ZONE 'UTC'),
     metadata JSONB,  -- Extra metadata as JSON (language, author, etc.)
     qdrant_status VARCHAR(20) DEFAULT 'pending',  -- pending, indexed, failed
     qdrant_collection_id VARCHAR(255),  -- Reference to Qdrant collection
     error_message TEXT,  -- Error details if indexing failed
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    created_at TIMESTAMP DEFAULT (CURRENT_TIMESTAMP AT TIME ZONE 'UTC'),
+    updated_at TIMESTAMP DEFAULT (CURRENT_TIMESTAMP AT TIME ZONE 'UTC')
 );
 
 -- Create indexes for common query patterns

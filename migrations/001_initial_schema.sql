@@ -12,7 +12,7 @@ CREATE TABLE IF NOT EXISTS messages (
     sender_id VARCHAR(255),
     text TEXT NOT NULL,
     reply_to_message_id INTEGER,
-    timestamp TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+    timestamp TIMESTAMP NOT NULL DEFAULT (CURRENT_TIMESTAMP AT TIME ZONE 'UTC')
 );
 
 -- Create indexes for common query patterns (if they don't exist)

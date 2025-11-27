@@ -10,7 +10,7 @@ Handles:
 
 import logging
 from typing import List, Optional, Dict, Any
-from datetime import datetime
+from datetime import datetime, timezone
 from dataclasses import dataclass
 
 from sqlalchemy import select, update, delete, and_, func
@@ -305,7 +305,7 @@ class DocumentService:
             model.qdrant_status = status
             model.qdrant_collection_id = collection_id
             model.error_message = error_message
-            model.updated_at = datetime.utcnow()
+            model.updated_at = datetime.now(timezone.utc)
 
             self.db.commit()
 
@@ -347,7 +347,7 @@ class DocumentService:
                 return False
 
             model.qdrant_status = 'deleted'
-            model.updated_at = datetime.utcnow()
+            model.updated_at = datetime.now(timezone.utc)
 
             self.db.commit()
 

@@ -1,6 +1,6 @@
 """PostgreSQL database layer using SQLAlchemy and asyncpg."""
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional, List
 from dataclasses import dataclass
 from contextlib import contextmanager
@@ -14,6 +14,15 @@ logger = logging.getLogger(__name__)
 Base = declarative_base()
 
 
+def utc_now() -> datetime:
+    """Get current time in UTC timezone.
+
+    Returns:
+        datetime object with UTC timezone information
+    """
+    return datetime.now(timezone.utc)
+
+
 class MessageModel(Base):
     """SQLAlchemy model for messages table (one message per record)."""
     __tablename__ = "messages"
@@ -25,7 +34,7 @@ class MessageModel(Base):
     sender_id = Column(String(255), nullable=False, index=True)  # user_id (if user) or bot model name (if bot)
     text = Column(Text, nullable=False)
     reply_to_message_id = Column(Integer, nullable=True, index=True)  # References any previous message (user or bot)
-    timestamp = Column(DateTime, default=datetime.utcnow, nullable=False, index=True)
+    timestamp = Column(DateTime(timezone=True), default=utc_now, nullable=False, index=True)
 
     def __repr__(self) -> str:
         return (
@@ -45,14 +54,14 @@ class DocumentModel(Base):
     content = Column(Text, nullable=True)
     source_url = Column(String(512), nullable=True)
     uploaded_by = Column(String(255), nullable=True)
-    uploaded_at = Column(DateTime, default=datetime.utcnow, nullable=False, index=True)
+    uploaded_at = Column(DateTime(timezone=True), default=utc_now, nullable=False, index=True)
     document_metadata = Column(JSON, nullable=True)
     qdrant_status = Column(String(20), nullable=False, default='pending', index=True)
     qdrant_collection_id = Column(String(255), nullable=True)
     error_message = Column(Text, nullable=True)
     relative_path = Column(String(512), nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False, index=True)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False, index=True)
+    created_at = Column(DateTime(timezone=True), default=utc_now, nullable=False, index=True)
+    updated_at = Column(DateTime(timezone=True), default=utc_now, onupdate=utc_now, nullable=False, index=True)
 
     def __repr__(self) -> str:
         return (

@@ -8,7 +8,7 @@ Tracks:
 
 import logging
 from typing import Dict, Any, Optional
-from datetime import datetime
+from datetime import datetime, timezone
 from dataclasses import dataclass, field
 
 logger = logging.getLogger(__name__)
@@ -20,7 +20,7 @@ class DegradationMetrics:
 
     feature_name: str
     error_type: str  # e.g., "health_check", "embedding", "search", "unknown"
-    timestamp: datetime = field(default_factory=datetime.utcnow)
+    timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     reason: Optional[str] = None
     details: Dict[str, Any] = field(default_factory=dict)
 

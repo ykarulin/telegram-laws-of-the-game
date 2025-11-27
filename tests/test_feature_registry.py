@@ -1,7 +1,7 @@
 """Tests for feature registry and feature state management."""
 
 import pytest
-from datetime import datetime
+from datetime import datetime, timezone
 from unittest.mock import patch, MagicMock
 from src.core.features import FeatureRegistry, FeatureState, FeatureStatus
 
@@ -66,9 +66,9 @@ class TestFeatureState:
 
     def test_feature_state_last_checked_set_on_creation(self):
         """Test that last_checked is set when FeatureState is created."""
-        before = datetime.utcnow()
+        before = datetime.now(timezone.utc)
         state = FeatureState(name="feature", status=FeatureStatus.ENABLED)
-        after = datetime.utcnow()
+        after = datetime.now(timezone.utc)
 
         # Note: last_checked is NOT set in __init__, only when registered
         assert state.last_checked is None
@@ -341,9 +341,9 @@ class TestFeatureRegistry:
 
     def test_last_checked_timestamp_set(self, registry):
         """Test that last_checked is set to current time."""
-        before = datetime.utcnow()
+        before = datetime.now(timezone.utc)
         registry.register_feature("feature", FeatureStatus.ENABLED)
-        after = datetime.utcnow()
+        after = datetime.now(timezone.utc)
 
         state = registry.get_feature_state("feature")
         assert before <= state.last_checked <= after

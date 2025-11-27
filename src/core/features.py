@@ -4,7 +4,7 @@ import logging
 from enum import Enum
 from typing import Optional, Dict, Any
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
 
@@ -64,7 +64,7 @@ class FeatureRegistry:
             name=name,
             status=status,
             reason=reason,
-            last_checked=datetime.utcnow(),
+            last_checked=datetime.now(timezone.utc),
             metadata=metadata or {},
         )
 
@@ -146,7 +146,7 @@ class FeatureRegistry:
         old_status = state.status
         state.status = status
         state.reason = reason or state.reason
-        state.last_checked = datetime.utcnow()
+        state.last_checked = datetime.now(timezone.utc)
         if metadata:
             state.metadata.update(metadata)
 
