@@ -211,6 +211,8 @@ class MessageHandler:
     def _retrieve_documents(self, query: str) -> List[RetrievedChunk]:
         """Retrieve relevant document chunks via semantic search.
 
+        Detects runtime degradation and logs feature status updates.
+
         Args:
             query: User query text to search for in documents
 
@@ -224,6 +226,11 @@ class MessageHandler:
                 logger.debug(
                     f"RAG retrieval unavailable: {state.reason}. Status: {state.status.value}"
                 )
+                # If degraded, include degradation count in logs
+                if state.is_degraded():
+                    logger.warning(
+                        f"RAG retrieval degraded (degradation_count={state.degradation_count}): {state.reason}"
+                    )
             else:
                 logger.debug("RAG retrieval not registered in feature registry")
             return []
@@ -253,17 +260,30 @@ class MessageHandler:
                     f"similarity_scores={[f'{chunk.score:.4f}' for chunk in retrieved_chunks]}"
                 )
             else:
-                logger.info(
-                    f"No relevant documents found for query (embedding search completed but no results above threshold). "
-                    f"Query: '{query[:100]}...', "
-                    f"Threshold: {self.config.similarity_threshold}, "
-                    f"Top K: {self.config.top_k_retrievals}"
-                )
+                # Check if failure was due to runtime degradation
+                state = self.feature_registry.get_feature_state("rag_retrieval")
+                if state and state.is_degraded():
+                    logger.warning(
+                        f"Document retrieval failed - feature degraded (degradation_count={state.degradation_count}): {state.reason}"
+                    )
+                else:
+                    logger.info(
+                        f"No relevant documents found for query (embedding search completed but no results above threshold). "
+                        f"Query: '{query[:100]}...', "
+                        f"Threshold: {self.config.similarity_threshold}, "
+                        f"Top K: {self.config.top_k_retrievals}"
+                    )
 
             return retrieved_chunks
 
         except Exception as e:
             logger.warning(f"Document retrieval failed (continuing without context): {e}", exc_info=True)
+            # Mark feature as degraded on unexpected exceptions
+            state = self.feature_registry.get_feature_state("rag_retrieval")
+            if state:
+                logger.warning(
+                    f"RAG retrieval degraded due to exception (degradation_count={state.degradation_count})"
+                )
             return []
 
     def _log_retrieval_details(self, retrieved_chunks: List[RetrievedChunk]) -> None:

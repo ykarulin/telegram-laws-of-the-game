@@ -6,6 +6,7 @@ Handles:
 - Searching Qdrant for relevant document chunks
 - Formatting retrieved chunks for LLM context
 - Handling fallback when retrieval fails
+- Detecting and reporting runtime degradation
 """
 
 import logging
@@ -14,15 +15,41 @@ from typing import List, Dict, Any, Optional
 from sqlalchemy.orm import Session
 from src.services.embedding_service import EmbeddingService
 from src.core.vector_db import VectorDatabase, RetrievedChunk
+from src.core.features import FeatureRegistry, FeatureStatus
+from src.core.metrics import MetricsCollector
 from src.config import Config
+from src.exceptions import RetrievalError
 
 logger = logging.getLogger(__name__)
+
+# User-facing fallback notice for degraded retrieval
+RETRIEVAL_DEGRADED_NOTICE = (
+    "\n\n_Note: Document context unavailable due to temporary service issue. "
+    "Answering based on training data only._"
+)
+
+# Global metrics collector (singleton-like pattern)
+_metrics_collector: Optional[MetricsCollector] = None
+
+
+def get_metrics_collector() -> MetricsCollector:
+    """Get or create the global metrics collector."""
+    global _metrics_collector
+    if _metrics_collector is None:
+        _metrics_collector = MetricsCollector()
+    return _metrics_collector
 
 
 class RetrievalService:
     """Retrieve and format context from vector database."""
 
-    def __init__(self, config: Config, embedding_service: EmbeddingService, db_session: Optional[Session] = None):
+    def __init__(
+        self,
+        config: Config,
+        embedding_service: EmbeddingService,
+        db_session: Optional[Session] = None,
+        feature_registry: Optional[FeatureRegistry] = None,
+    ):
         """
         Initialize retrieval service.
 
@@ -30,10 +57,12 @@ class RetrievalService:
             config: Configuration object with Qdrant settings
             embedding_service: EmbeddingService for query embedding
             db_session: SQLAlchemy database session for document service operations
+            feature_registry: Optional FeatureRegistry for tracking runtime degradation
         """
         self.config = config
         self.embedding_service = embedding_service
         self.db_session = db_session
+        self.feature_registry = feature_registry or FeatureRegistry()
         self.vector_db = VectorDatabase(
             host=config.qdrant_host,
             port=config.qdrant_port,
@@ -54,6 +83,8 @@ class RetrievalService:
 
         With dynamic threshold enabled, filters to chunks within a percentage
         of the best score, but never below static threshold.
+
+        Detects runtime failures and marks feature as DEGRADED if retrieval fails.
 
         Args:
             query: User question or search query
@@ -79,12 +110,39 @@ class RetrievalService:
         threshold = threshold or self.config.similarity_threshold
 
         try:
+            # Runtime health check before attempting retrieval
+            if not self.vector_db.health_check():
+                logger.error("Qdrant health check failed at runtime")
+                self.feature_registry.update_status(
+                    "rag_retrieval",
+                    FeatureStatus.DEGRADED,
+                    reason="Qdrant server not responding",
+                )
+                # Record metrics for this degradation event
+                get_metrics_collector().record_degradation(
+                    "rag_retrieval",
+                    error_type="health_check",
+                    reason="Qdrant health check failed",
+                )
+                raise RetrievalError("Qdrant health check failed", error_type="health_check")
+
             # Convert query to embedding
             query_embedding = self.embedding_service.embed_text(query)
 
             if query_embedding is None:
                 logger.error("Failed to embed query")
-                return []
+                self.feature_registry.update_status(
+                    "rag_retrieval",
+                    FeatureStatus.DEGRADED,
+                    reason="Query embedding generation failed",
+                )
+                # Record metrics for this degradation event
+                get_metrics_collector().record_degradation(
+                    "rag_retrieval",
+                    error_type="embedding",
+                    reason="Query embedding generation failed",
+                )
+                raise RetrievalError("Failed to embed query", error_type="embedding")
 
             # Log query embedding for debugging dev/prod differences
             logger.info(
@@ -142,8 +200,23 @@ class RetrievalService:
 
             return results
 
+        except RetrievalError as e:
+            # Already logged and marked feature as degraded
+            logger.error(f"Retrieval failed ({e.error_type}): {e}")
+            return []
         except Exception as e:
             logger.error(f"Retrieval failed: {e}")
+            self.feature_registry.update_status(
+                "rag_retrieval",
+                FeatureStatus.DEGRADED,
+                reason=f"Retrieval operation failed: {str(e)[:100]}",
+            )
+            # Record metrics for unexpected failures
+            get_metrics_collector().record_degradation(
+                "rag_retrieval",
+                error_type="search",
+                reason=str(e)[:100],
+            )
             return []
 
     def _apply_dynamic_threshold(
@@ -306,6 +379,8 @@ class RetrievalService:
         """
         Convenience method: retrieve and format context in one call.
 
+        Includes user-facing fallback notice if retrieval is degraded.
+
         Args:
             query: User question
             top_k: Number of results (default from config)
@@ -313,7 +388,7 @@ class RetrievalService:
             include_scores: Include relevance scores in output
 
         Returns:
-            Formatted context string, or empty string if no results
+            Formatted context string (with fallback notice if degraded), or empty string if no results
 
         Examples:
             >>> context = service.retrieve_and_format("What is VAR?")
@@ -324,6 +399,10 @@ class RetrievalService:
 
         if not chunks:
             logger.warning(f"No relevant documents found for query: {query}")
+            # Check if failure was due to degradation and include notice
+            if self.feature_registry.get_feature_state("rag_retrieval") and \
+               self.feature_registry.get_feature_state("rag_retrieval").is_degraded():
+                return RETRIEVAL_DEGRADED_NOTICE
             return ""
 
         return self.format_context(chunks, include_scores=include_scores)

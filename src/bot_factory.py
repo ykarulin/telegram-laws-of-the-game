@@ -43,7 +43,9 @@ def create_application(config: Config) -> Application:
             model=config.embedding_model
         )
         db_session = db.SessionLocal()
-        retrieval_service = RetrievalService(config, embedding_service, db_session)
+        retrieval_service = RetrievalService(
+            config, embedding_service, db_session, feature_registry
+        )
 
         # Verify Qdrant is actually accessible
         if retrieval_service.should_use_retrieval():

@@ -27,10 +27,15 @@ class FeatureState:
     reason: Optional[str] = None
     last_checked: Optional[datetime] = None
     metadata: Optional[Dict[str, Any]] = field(default_factory=dict)
+    degradation_count: int = 0  # Tracks runtime degradation events
 
     def is_available(self) -> bool:
         """Check if feature is usable."""
         return self.status == FeatureStatus.ENABLED
+
+    def is_degraded(self) -> bool:
+        """Check if feature is degraded but not unavailable."""
+        return self.status == FeatureStatus.DEGRADED
 
 
 class FeatureRegistry:
@@ -108,6 +113,64 @@ class FeatureRegistry:
         """
         return self._features.copy()
 
+    def update_status(
+        self,
+        name: str,
+        status: FeatureStatus,
+        reason: Optional[str] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        """Update a feature's status at runtime.
+
+        Used for tracking runtime degradation or recovery.
+
+        Args:
+            name: Feature name
+            status: New status
+            reason: Optional reason for the status change
+            metadata: Optional additional metadata
+        """
+        state = self._features.get(name)
+        if not state:
+            # If feature not registered yet, create it
+            self.register_feature(name, status, reason, metadata)
+            return
+
+        # Track degradation count if transitioning to DEGRADED
+        if status == FeatureStatus.DEGRADED:
+            if state.status != FeatureStatus.DEGRADED:
+                # Only increment when first transitioning to degraded
+                state.degradation_count += 1
+
+        # Update the state
+        old_status = state.status
+        state.status = status
+        state.reason = reason or state.reason
+        state.last_checked = datetime.utcnow()
+        if metadata:
+            state.metadata.update(metadata)
+
+        # Log status transitions
+        if status == FeatureStatus.DEGRADED:
+            logger.warning(
+                f"Feature '{name}' degraded at runtime: {reason or 'unknown cause'} "
+                f"(degradation_count={state.degradation_count})"
+            )
+        elif status == FeatureStatus.ENABLED and old_status != FeatureStatus.ENABLED:
+            logger.info(f"Feature '{name}' recovered: {reason or 'operational'}")
+
+    def get_degradation_count(self, name: str) -> int:
+        """Get the number of times a feature has been degraded.
+
+        Args:
+            name: Feature name
+
+        Returns:
+            Degradation event count, 0 if feature not found
+        """
+        state = self._features.get(name)
+        return state.degradation_count if state else 0
+
     def log_summary(self) -> None:
         """Log a summary of all feature states."""
         if not self._features:
@@ -153,4 +216,6 @@ class FeatureRegistry:
             logger.warning(f"  UNAVAILABLE - {name}: {state.reason}")
         for name in degraded:
             state = self._features[name]
-            logger.warning(f"  DEGRADED - {name}: {state.reason}")
+            logger.warning(
+                f"  DEGRADED - {name}: {state.reason} (degradation_count={state.degradation_count})"
+            )
