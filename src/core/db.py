@@ -5,7 +5,7 @@ from typing import Optional, List
 from dataclasses import dataclass
 from contextlib import contextmanager
 
-from sqlalchemy import create_engine, Column, Integer, String, Text, DateTime, ForeignKey, select, desc, and_
+from sqlalchemy import create_engine, Column, Integer, String, Text, DateTime, ForeignKey, select, desc, and_, JSON
 from sqlalchemy.orm import sessionmaker, declarative_base, Session, relationship
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError, OperationalError
 
@@ -31,6 +31,33 @@ class MessageModel(Base):
         return (
             f"MessageModel(id={self.id}, message_id={self.message_id}, chat_id={self.chat_id}, "
             f"sender={self.sender_type}, reply_to={self.reply_to_message_id})"
+        )
+
+
+class DocumentModel(Base):
+    """SQLAlchemy model for documents table (tracks uploaded documents and their indexing status)."""
+    __tablename__ = "documents"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    name = Column(String(255), nullable=False, index=True)
+    document_type = Column(String(50), nullable=False, index=True)
+    version = Column(String(50), nullable=True)
+    content = Column(Text, nullable=True)
+    source_url = Column(String(512), nullable=True)
+    uploaded_by = Column(String(255), nullable=True)
+    uploaded_at = Column(DateTime, default=datetime.utcnow, nullable=False, index=True)
+    metadata = Column(JSON, nullable=True)
+    qdrant_status = Column(String(20), nullable=False, default='pending', index=True)
+    qdrant_collection_id = Column(String(255), nullable=True)
+    error_message = Column(Text, nullable=True)
+    relative_path = Column(String(512), nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False, index=True)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False, index=True)
+
+    def __repr__(self) -> str:
+        return (
+            f"DocumentModel(id={self.id}, name={self.name}, type={self.document_type}, "
+            f"status={self.qdrant_status}, version={self.version})"
         )
 
 

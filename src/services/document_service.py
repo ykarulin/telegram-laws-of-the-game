@@ -13,10 +13,10 @@ from typing import List, Optional, Dict, Any
 from datetime import datetime
 from dataclasses import dataclass
 
-from sqlalchemy import select, update, delete
+from sqlalchemy import select, update, delete, and_, func
 from sqlalchemy.orm import Session
 
-from src.core.db import MessageModel  # Import Session for typing
+from src.core.db import DocumentModel
 from src.config import Config
 
 logger = logging.getLogger(__name__)
@@ -117,42 +117,31 @@ class DocumentService:
             1
         """
         try:
-            # Create document record using raw SQL for now
-            # (Will replace with SQLAlchemy model in future)
-            import json
-            from sqlalchemy import text
+            # Validate inputs at boundary
+            if not name or not name.strip():
+                raise ValueError("Document name cannot be empty")
+            if not document_type or not document_type.strip():
+                raise ValueError("Document type cannot be empty")
+            if not content or not content.strip():
+                raise ValueError("Document content cannot be empty")
 
-            metadata_json = json.dumps(metadata) if metadata else None
-
-            query = text("""
-                INSERT INTO documents (
-                    name, document_type, version, content,
-                    source_url, uploaded_by, metadata,
-                    relative_path, qdrant_status, created_at, updated_at
-                ) VALUES (
-                    :name, :doc_type, :version, :content,
-                    :source_url, :uploaded_by, :metadata,
-                    :relative_path, 'pending', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
-                )
-                RETURNING id
-            """)
-
-            result = self.db.execute(
-                query,
-                {
-                    "name": name,
-                    "doc_type": document_type,
-                    "version": version,
-                    "content": content,
-                    "source_url": source_url,
-                    "uploaded_by": uploaded_by,
-                    "metadata": metadata_json,
-                    "relative_path": relative_path,
-                },
+            # Create document record using SQLAlchemy ORM
+            document = DocumentModel(
+                name=name.strip(),
+                document_type=document_type.strip(),
+                version=version.strip() if version else None,
+                content=content,
+                source_url=source_url.strip() if source_url else None,
+                uploaded_by=uploaded_by.strip() if uploaded_by else None,
+                metadata=metadata,  # SQLAlchemy JSON column handles serialization
+                relative_path=relative_path.strip() if relative_path else None,
+                qdrant_status='pending',
             )
 
+            self.db.add(document)
+            self.db.flush()  # Get the ID without committing
+            doc_id = document.id
             self.db.commit()
-            doc_id = result.scalar()
 
             logger.info(
                 f"Uploaded document '{name}' (type={document_type}, id={doc_id})"
@@ -180,38 +169,30 @@ class DocumentService:
             'Laws of the Game 2024-25'
         """
         try:
-            from sqlalchemy import text
-            import json
+            model = self.db.query(DocumentModel).filter(
+                DocumentModel.id == doc_id
+            ).first()
 
-            query = text("SELECT * FROM documents WHERE id = :id")
-            result = self.db.execute(query, {"id": doc_id}).first()
-
-            if not result:
+            if not model:
                 logger.warning(f"Document {doc_id} not found")
                 return None
 
-            # Parse result tuple into DocumentContent
-            row = result._mapping
-            metadata = row["metadata"]
-            if metadata and isinstance(metadata, str):
-                metadata = json.loads(metadata)
-
             return DocumentContent(
-                id=row["id"],
-                name=row["name"],
-                document_type=row["document_type"],
-                version=row["version"],
-                content=row["content"],
-                source_url=row["source_url"],
-                uploaded_by=row["uploaded_by"],
-                uploaded_at=row["uploaded_at"],
-                metadata=metadata,
-                qdrant_status=row["qdrant_status"],
-                qdrant_collection_id=row["qdrant_collection_id"],
-                error_message=row["error_message"],
-                relative_path=row["relative_path"],
-                created_at=row["created_at"],
-                updated_at=row["updated_at"],
+                id=model.id,
+                name=model.name,
+                document_type=model.document_type,
+                version=model.version,
+                content=model.content,
+                source_url=model.source_url,
+                uploaded_by=model.uploaded_by,
+                uploaded_at=model.uploaded_at,
+                metadata=model.metadata,
+                qdrant_status=model.qdrant_status,
+                qdrant_collection_id=model.qdrant_collection_id,
+                error_message=model.error_message,
+                relative_path=model.relative_path,
+                created_at=model.created_at,
+                updated_at=model.updated_at,
             )
 
         except Exception as e:
@@ -239,46 +220,39 @@ class DocumentService:
             3
         """
         try:
-            from sqlalchemy import text
+            # Validate inputs at boundary
+            if document_type and not isinstance(document_type, str):
+                raise ValueError("document_type must be a string")
+            if qdrant_status and not isinstance(qdrant_status, str):
+                raise ValueError("qdrant_status must be a string")
 
-            where_clauses = []
+            # Build query with ORM filters
+            query = self.db.query(DocumentModel)
 
             if document_type:
-                where_clauses.append(f"document_type = '{document_type}'")
+                query = query.filter(DocumentModel.document_type == document_type.strip())
             if qdrant_status:
-                where_clauses.append(f"qdrant_status = '{qdrant_status}'")
+                query = query.filter(DocumentModel.qdrant_status == qdrant_status)
 
-            where_sql = " AND ".join(where_clauses)
-            where_sql = f"WHERE {where_sql}" if where_sql else ""
-
-            query_str = f"""
-                SELECT id, name, document_type, version, source_url,
-                       uploaded_by, uploaded_at, qdrant_status,
-                       error_message, relative_path, created_at, updated_at
-                FROM documents
-                {where_sql}
-                ORDER BY uploaded_at DESC
-            """
-
-            results = self.db.execute(text(query_str)).fetchall()
+            query = query.order_by(DocumentModel.uploaded_at.desc())
+            models = query.all()
 
             documents = []
-            for row in results:
-                row_dict = row._mapping
+            for model in models:
                 documents.append(
                     DocumentInfo(
-                        id=row_dict["id"],
-                        name=row_dict["name"],
-                        document_type=row_dict["document_type"],
-                        version=row_dict["version"],
-                        source_url=row_dict["source_url"],
-                        uploaded_by=row_dict["uploaded_by"],
-                        uploaded_at=row_dict["uploaded_at"],
-                        qdrant_status=row_dict["qdrant_status"],
-                        error_message=row_dict["error_message"],
-                        relative_path=row_dict["relative_path"],
-                        created_at=row_dict["created_at"],
-                        updated_at=row_dict["updated_at"],
+                        id=model.id,
+                        name=model.name,
+                        document_type=model.document_type,
+                        version=model.version,
+                        source_url=model.source_url,
+                        uploaded_by=model.uploaded_by,
+                        uploaded_at=model.uploaded_at,
+                        qdrant_status=model.qdrant_status,
+                        error_message=model.error_message,
+                        relative_path=model.relative_path,
+                        created_at=model.created_at,
+                        updated_at=model.updated_at,
                     )
                 )
 
@@ -320,26 +294,18 @@ class DocumentService:
             True
         """
         try:
-            from sqlalchemy import text
+            model = self.db.query(DocumentModel).filter(
+                DocumentModel.id == doc_id
+            ).first()
 
-            query = text("""
-                UPDATE documents
-                SET qdrant_status = :status,
-                    qdrant_collection_id = :collection_id,
-                    error_message = :error_msg,
-                    updated_at = CURRENT_TIMESTAMP
-                WHERE id = :id
-            """)
+            if not model:
+                logger.warning(f"Document {doc_id} not found")
+                return False
 
-            self.db.execute(
-                query,
-                {
-                    "id": doc_id,
-                    "status": status,
-                    "collection_id": collection_id,
-                    "error_msg": error_message,
-                },
-            )
+            model.qdrant_status = status
+            model.qdrant_collection_id = collection_id
+            model.error_message = error_message
+            model.updated_at = datetime.utcnow()
 
             self.db.commit()
 
@@ -371,22 +337,19 @@ class DocumentService:
             True
         """
         try:
-            from sqlalchemy import text
-
             # Soft delete by marking as deleted
-            query = text("""
-                UPDATE documents
-                SET qdrant_status = 'deleted',
-                    updated_at = CURRENT_TIMESTAMP
-                WHERE id = :id
-            """)
+            model = self.db.query(DocumentModel).filter(
+                DocumentModel.id == doc_id
+            ).first()
 
-            result = self.db.execute(query, {"id": doc_id})
-            self.db.commit()
-
-            if result.rowcount == 0:
+            if not model:
                 logger.warning(f"Document {doc_id} not found")
                 return False
+
+            model.qdrant_status = 'deleted'
+            model.updated_at = datetime.utcnow()
+
+            self.db.commit()
 
             logger.info(f"Deleted document {doc_id}")
             return True
@@ -433,20 +396,15 @@ class DocumentService:
             True if exists, False otherwise
         """
         try:
-            from sqlalchemy import text
+            count = self.db.query(DocumentModel).filter(
+                and_(
+                    DocumentModel.name == name,
+                    DocumentModel.document_type == document_type,
+                    DocumentModel.qdrant_status != 'deleted'
+                )
+            ).count()
 
-            query = text("""
-                SELECT COUNT(*) as count
-                FROM documents
-                WHERE name = :name AND document_type = :doc_type
-                AND qdrant_status != 'deleted'
-            """)
-
-            result = self.db.execute(
-                query, {"name": name, "doc_type": document_type}
-            ).scalar()
-
-            return result > 0
+            return count > 0
 
         except Exception as e:
             logger.error(f"Error checking document existence: {e}")
@@ -468,18 +426,14 @@ class DocumentService:
             ['Laws of Game 2024-25', 'VAR Guidelines 2024']
         """
         try:
-            from sqlalchemy import text
+            models = self.db.query(DocumentModel.name).filter(
+                and_(
+                    DocumentModel.qdrant_status == 'indexed',
+                    DocumentModel.qdrant_status != 'deleted'
+                )
+            ).distinct().order_by(DocumentModel.name.asc()).all()
 
-            query = text("""
-                SELECT DISTINCT name
-                FROM documents
-                WHERE qdrant_status = 'indexed'
-                AND qdrant_status != 'deleted'
-                ORDER BY name ASC
-            """)
-
-            results = self.db.execute(query).fetchall()
-            names = [row[0] for row in results]
+            names = [model[0] for model in models]
 
             logger.info(
                 f"Retrieved {len(names)} indexed document names for selection tool"
@@ -509,25 +463,18 @@ class DocumentService:
             {'Laws of Game 2024-25': 1}
         """
         try:
-            from sqlalchemy import text
-
             if not document_names:
                 return {}
 
-            # Build placeholder for SQL
-            placeholders = ",".join([f":name_{i}" for i in range(len(document_names))])
-            params = {f"name_{i}": name for i, name in enumerate(document_names)}
+            models = self.db.query(DocumentModel.name, DocumentModel.id).filter(
+                and_(
+                    DocumentModel.name.in_(document_names),
+                    DocumentModel.qdrant_status == 'indexed',
+                    DocumentModel.qdrant_status != 'deleted'
+                )
+            ).all()
 
-            query = text(f"""
-                SELECT name, id
-                FROM documents
-                WHERE name IN ({placeholders})
-                AND qdrant_status = 'indexed'
-                AND qdrant_status != 'deleted'
-            """)
-
-            results = self.db.execute(query, params).fetchall()
-            doc_map = {row[0]: row[1] for row in results}
+            doc_map = {model[0]: model[1] for model in models}
 
             # Log which documents were not found
             not_found = set(document_names) - set(doc_map.keys())
