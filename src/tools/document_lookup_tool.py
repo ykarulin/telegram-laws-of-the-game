@@ -211,9 +211,32 @@ class DocumentLookupTool:
                 threshold=min_similarity,
             )
 
+            # Log the tool call details for monitoring
             logger.info(
-                f"Document lookup successful: retrieved {len(results)} chunks from {len(document_names)} documents"
+                f"Model tool call - lookup_documents: "
+                f"documents=[{', '.join(document_names)}], "
+                f"query='{query}', "
+                f"top_k={top_k}, "
+                f"min_similarity={min_similarity}"
             )
+
+            # Log chunk scores if available
+            if results:
+                try:
+                    chunk_scores = [f'{chunk.score:.4f}' for chunk in results]
+                    logger.info(
+                        f"Document lookup successful: retrieved {len(results)} chunks from {len(document_names)} documents. "
+                        f"Chunk scores: {chunk_scores}"
+                    )
+                except (AttributeError, TypeError):
+                    # Fallback if chunks don't have score attribute
+                    logger.info(
+                        f"Document lookup successful: retrieved {len(results)} chunks from {len(document_names)} documents"
+                    )
+            else:
+                logger.info(
+                    f"Document lookup completed: no chunks retrieved from {len(document_names)} documents"
+                )
 
             return ToolResult(
                 success=True,
@@ -225,7 +248,13 @@ class DocumentLookupTool:
 
         except Exception as e:
             error_msg = f"Lookup failed: {str(e)}"
-            logger.error(error_msg, exc_info=True)
+            logger.error(
+                f"Model tool call failed - lookup_documents: "
+                f"documents=[{', '.join(document_names)}], "
+                f"query='{query}', "
+                f"error={error_msg}",
+                exc_info=True
+            )
             return ToolResult(
                 success=False,
                 documents_searched=document_names,

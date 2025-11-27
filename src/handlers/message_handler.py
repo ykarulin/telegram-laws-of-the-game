@@ -322,6 +322,15 @@ class MessageHandler:
         Returns:
             Generated response text (possibly with citations appended)
         """
+        # Log available documents if tool is enabled
+        if self.document_lookup_tool:
+            available_docs = self._get_available_documents()
+            if available_docs:
+                logger.info(
+                    f"Documents supplied to model for intelligent selection: {len(available_docs)} total. "
+                    f"Available documents: {', '.join(available_docs)}"
+                )
+
         # Prepare augmented context combining conversation history and documents
         augmented_context: Optional[List[Dict[str, str]]] = None
         if conversation_context or retrieved_context:

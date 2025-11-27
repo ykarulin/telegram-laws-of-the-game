@@ -114,6 +114,17 @@ class RetrievalService:
                     f"dynamic_margin={self.config.rag_dynamic_threshold_margin}, "
                     f"scores=[{', '.join(f'{r.score:.4f}' for r in results)}])"
                 )
+                # Log detailed chunk information at INFO level
+                chunk_details = []
+                for i, result in enumerate(results, 1):
+                    doc_name = result.metadata.get("document_name", "unknown") if result.metadata else "unknown"
+                    section = result.metadata.get("section", "N/A") if result.metadata else "N/A"
+                    chunk_details.append(
+                        f"[{i}] doc='{doc_name}', score={result.score:.4f}, section='{section}'"
+                    )
+                logger.info(
+                    f"Chunks provided after all retrieval calls: {'; '.join(chunk_details)}"
+                )
                 for i, result in enumerate(results, 1):
                     logger.debug(
                         f"  Result {i}: score={result.score:.4f}, "
@@ -474,6 +485,19 @@ class RetrievalService:
                 f"Retrieved {len(filtered_results)} chunks from {len(document_ids)} documents "
                 f"for query: '{query[:100]}...'"
             )
+
+            # Log detailed chunk information for monitoring
+            if filtered_results:
+                chunk_details = []
+                for i, chunk in enumerate(filtered_results, 1):
+                    doc_name = chunk.metadata.get("document_name", "unknown") if chunk.metadata else "unknown"
+                    chunk_details.append(
+                        f"[{i}] doc='{doc_name}', score={chunk.score:.4f}, "
+                        f"section='{chunk.metadata.get('section', 'N/A') if chunk.metadata else 'N/A'}'"
+                    )
+                logger.info(
+                    f"Chunk details from document search: {'; '.join(chunk_details)}"
+                )
 
             return filtered_results
 
