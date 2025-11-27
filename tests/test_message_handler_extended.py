@@ -7,6 +7,7 @@ from telegram.ext import ContextTypes
 from src.handlers.message_handler import MessageHandler
 from src.config import Config, Environment
 from src.core.vector_db import RetrievedChunk
+from src.core.features import FeatureRegistry, FeatureStatus
 
 
 class TestMessageHandlerExtended:
@@ -72,6 +73,13 @@ class TestMessageHandlerExtended:
     def mock_context(self):
         """Create a mock Telegram Context object."""
         return AsyncMock(spec=ContextTypes.DEFAULT_TYPE)
+
+    @pytest.fixture
+    def feature_registry_with_rag(self):
+        """Create a feature registry with RAG enabled."""
+        registry = FeatureRegistry()
+        registry.register_feature("rag_retrieval", FeatureStatus.ENABLED)
+        return registry
 
     @pytest.mark.asyncio
     async def test_handle_with_long_user_message(self, mock_llm_client, mock_database, mock_config, mock_update, mock_context):
@@ -164,7 +172,7 @@ class TestMessageHandlerExtended:
         assert str(user_id) == "123"
 
     @pytest.mark.asyncio
-    async def test_handle_retrieval_with_multiple_chunks(self, mock_llm_client, mock_database, mock_config, mock_retrieval_service, mock_update, mock_context):
+    async def test_handle_retrieval_with_multiple_chunks(self, mock_llm_client, mock_database, mock_config, mock_retrieval_service, mock_update, mock_context, feature_registry_with_rag):
         """Test handling retrieval with multiple document chunks."""
         chunks = [
             RetrievedChunk("1", f"Content {i}", 0.9 - i * 0.1, {"doc": f"file{i}"})
@@ -178,7 +186,8 @@ class TestMessageHandlerExtended:
             mock_llm_client,
             mock_database,
             mock_config,
-            mock_retrieval_service
+            mock_retrieval_service,
+            feature_registry=feature_registry_with_rag
         )
 
         await handler.handle(mock_update, mock_context)
@@ -187,7 +196,7 @@ class TestMessageHandlerExtended:
         assert mock_retrieval_service.retrieve_context.called
 
     @pytest.mark.asyncio
-    async def test_handle_citation_formatting(self, mock_llm_client, mock_database, mock_config, mock_retrieval_service, mock_update, mock_context):
+    async def test_handle_citation_formatting(self, mock_llm_client, mock_database, mock_config, mock_retrieval_service, mock_update, mock_context, feature_registry_with_rag):
         """Test that citations are properly formatted."""
         chunk = RetrievedChunk(
             "1",
@@ -204,7 +213,8 @@ class TestMessageHandlerExtended:
             mock_llm_client,
             mock_database,
             mock_config,
-            mock_retrieval_service
+            mock_retrieval_service,
+            feature_registry=feature_registry_with_rag
         )
 
         await handler.handle(mock_update, mock_context)

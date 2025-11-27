@@ -8,6 +8,7 @@ from src.config import Config, Environment
 from src.services.embedding_service import EmbeddingService
 from src.services.retrieval_service import RetrievalService
 from src.core.vector_db import RetrievedChunk
+from src.core.features import FeatureRegistry, FeatureStatus
 
 
 class TestRAGIntegration:
@@ -25,6 +26,7 @@ class TestRAGIntegration:
         config.qdrant_collection_name = "football_documents"
         config.top_k_retrievals = 5
         config.similarity_threshold = 0.55
+        config.rag_dynamic_threshold_margin = None
         return config
 
     @pytest.fixture
@@ -94,6 +96,13 @@ class TestRAGIntegration:
         """Create a mock Telegram Context object."""
         return AsyncMock(spec=ContextTypes.DEFAULT_TYPE)
 
+    @pytest.fixture
+    def feature_registry_with_rag(self):
+        """Create a feature registry with RAG enabled."""
+        registry = FeatureRegistry()
+        registry.register_feature("rag_retrieval", FeatureStatus.ENABLED)
+        return registry
+
     @pytest.mark.asyncio
     async def test_message_handler_with_retrieval_service(
         self,
@@ -103,7 +112,8 @@ class TestRAGIntegration:
         mock_retrieval_service,
         mock_update,
         mock_context,
-        mock_vector_db
+        mock_vector_db,
+        feature_registry_with_rag
     ):
         """Test message handler with RAG retrieval service."""
         # Setup - mock retrieval to return relevant chunks
@@ -119,7 +129,8 @@ class TestRAGIntegration:
             mock_llm_client,
             mock_database,
             mock_config,
-            mock_retrieval_service
+            mock_retrieval_service,
+            feature_registry=feature_registry_with_rag
         )
 
         # Execute
@@ -249,7 +260,8 @@ class TestRAGIntegration:
         mock_retrieval_service,
         mock_update,
         mock_context,
-        mock_vector_db
+        mock_vector_db,
+        feature_registry_with_rag
     ):
         """Test that RAG context is combined with conversation history."""
         from src.core.db import Message as DBMessage
@@ -290,7 +302,8 @@ class TestRAGIntegration:
             mock_llm_client,
             mock_database,
             mock_config,
-            mock_retrieval_service
+            mock_retrieval_service,
+            feature_registry=feature_registry_with_rag
         )
 
         # Execute
@@ -366,7 +379,8 @@ class TestRAGIntegration:
         mock_retrieval_service,
         mock_update,
         mock_context,
-        mock_vector_db
+        mock_vector_db,
+        feature_registry_with_rag
     ):
         """Test that multiple retrieved chunks are properly combined."""
         chunks = [
@@ -384,7 +398,8 @@ class TestRAGIntegration:
             mock_llm_client,
             mock_database,
             mock_config,
-            mock_retrieval_service
+            mock_retrieval_service,
+            feature_registry=feature_registry_with_rag
         )
 
         # Execute

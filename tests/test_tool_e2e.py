@@ -22,6 +22,7 @@ from src.services.embedding_service import EmbeddingService
 from src.services.retrieval_service import RetrievalService
 from src.tools.document_lookup_tool import DocumentLookupTool, ToolResult
 from src.core.vector_db import RetrievedChunk
+from src.core.features import FeatureRegistry, FeatureStatus
 
 
 @pytest.fixture
@@ -102,12 +103,21 @@ def mock_retrieval_service():
 
 
 @pytest.fixture
+def feature_registry_with_rag():
+    """Create a feature registry with RAG enabled."""
+    registry = FeatureRegistry()
+    registry.register_feature("rag_retrieval", FeatureStatus.ENABLED)
+    return registry
+
+
+@pytest.fixture
 def handler(
     mock_llm_client,
     mock_database,
     mock_config,
     mock_retrieval_service,
-    mock_embedding_service
+    mock_embedding_service,
+    feature_registry_with_rag
 ):
     """Create a MessageHandler with tool enabled."""
     return MessageHandler(
@@ -116,6 +126,7 @@ def handler(
         config=mock_config,
         retrieval_service=mock_retrieval_service,
         embedding_service=mock_embedding_service,
+        feature_registry=feature_registry_with_rag,
     )
 
 
@@ -268,7 +279,7 @@ class TestMixedRetrievalStrategy:
 
     def test_generic_rag_path_when_tool_disabled(
         self, mock_llm_client, mock_database, mock_config,
-        mock_retrieval_service, mock_embedding_service
+        mock_retrieval_service, mock_embedding_service, feature_registry_with_rag
     ):
         """Test generic RAG retrieval when tool is disabled."""
         mock_config.enable_document_selection = False
@@ -279,6 +290,7 @@ class TestMixedRetrievalStrategy:
             config=mock_config,
             retrieval_service=mock_retrieval_service,
             embedding_service=mock_embedding_service,
+            feature_registry=feature_registry_with_rag,
         )
 
         # Verify no tool is initialized
@@ -443,7 +455,7 @@ class TestToolFallbackBehavior:
 
     def test_generic_retrieval_fallback_when_tool_disabled(
         self, mock_llm_client, mock_database, mock_config,
-        mock_retrieval_service, mock_embedding_service
+        mock_retrieval_service, mock_embedding_service, feature_registry_with_rag
     ):
         """Test fallback to generic retrieval when tool is disabled."""
         mock_config.enable_document_selection = False
@@ -454,6 +466,7 @@ class TestToolFallbackBehavior:
             config=mock_config,
             retrieval_service=mock_retrieval_service,
             embedding_service=mock_embedding_service,
+            feature_registry=feature_registry_with_rag,
         )
 
         # Generic retrieval should be available

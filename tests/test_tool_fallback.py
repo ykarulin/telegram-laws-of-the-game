@@ -18,6 +18,7 @@ from src.core.db import ConversationDatabase
 from src.services.embedding_service import EmbeddingService
 from src.services.retrieval_service import RetrievalService
 from src.core.vector_db import RetrievedChunk
+from src.core.features import FeatureRegistry, FeatureStatus
 
 
 @pytest.fixture
@@ -97,6 +98,14 @@ def mock_retrieval_service():
     return service
 
 
+@pytest.fixture
+def feature_registry_with_rag():
+    """Create a feature registry with RAG enabled."""
+    registry = FeatureRegistry()
+    registry.register_feature("rag_retrieval", FeatureStatus.ENABLED)
+    return registry
+
+
 class TestToolInitializationWithDependencies:
     """Tests for tool initialization based on dependency availability."""
 
@@ -168,7 +177,7 @@ class TestGenericRagFallback:
 
     def test_generic_retrieval_works_without_tool(
         self, mock_llm_client, mock_database, config_with_tool_disabled,
-        mock_retrieval_service
+        mock_retrieval_service, feature_registry_with_rag
     ):
         """Test that generic retrieval works when tool is disabled."""
         handler = MessageHandler(
@@ -176,6 +185,7 @@ class TestGenericRagFallback:
             db=mock_database,
             config=config_with_tool_disabled,
             retrieval_service=mock_retrieval_service,
+            feature_registry=feature_registry_with_rag,
         )
 
         chunks = handler._retrieve_documents("test query")
@@ -185,7 +195,7 @@ class TestGenericRagFallback:
 
     def test_generic_retrieval_fallback_with_config_disabled(
         self, mock_llm_client, mock_database, config_with_tool_disabled,
-        mock_retrieval_service, mock_embedding_service
+        mock_retrieval_service, mock_embedding_service, feature_registry_with_rag
     ):
         """Test generic retrieval when tool is disabled by config."""
         handler = MessageHandler(
@@ -194,6 +204,7 @@ class TestGenericRagFallback:
             config=config_with_tool_disabled,
             retrieval_service=mock_retrieval_service,
             embedding_service=mock_embedding_service,
+            feature_registry=feature_registry_with_rag,
         )
 
         # Verify tool not initialized
@@ -221,7 +232,7 @@ class TestGenericRagFallback:
 
     def test_generic_retrieval_still_available_with_tool_enabled(
         self, mock_llm_client, mock_database, config_with_tool_enabled,
-        mock_retrieval_service, mock_embedding_service
+        mock_retrieval_service, mock_embedding_service, feature_registry_with_rag
     ):
         """Test that generic retrieval still happens with tool enabled."""
         handler = MessageHandler(
@@ -230,6 +241,7 @@ class TestGenericRagFallback:
             config=config_with_tool_enabled,
             retrieval_service=mock_retrieval_service,
             embedding_service=mock_embedding_service,
+            feature_registry=feature_registry_with_rag,
         )
 
         # Generic retrieval should still be available
@@ -397,7 +409,7 @@ class TestMixedRetrievalModes:
 
     def test_tool_disabled_uses_only_generic_retrieval(
         self, mock_llm_client, mock_database, config_with_tool_disabled,
-        mock_retrieval_service
+        mock_retrieval_service, feature_registry_with_rag
     ):
         """Test that disabled tool uses only generic retrieval."""
         handler = MessageHandler(
@@ -405,6 +417,7 @@ class TestMixedRetrievalModes:
             db=mock_database,
             config=config_with_tool_disabled,
             retrieval_service=mock_retrieval_service,
+            feature_registry=feature_registry_with_rag,
         )
 
         chunks = handler._retrieve_documents("test")
@@ -415,7 +428,7 @@ class TestMixedRetrievalModes:
 
     def test_tool_enabled_has_both_paths_available(
         self, mock_llm_client, mock_database, config_with_tool_enabled,
-        mock_retrieval_service, mock_embedding_service
+        mock_retrieval_service, mock_embedding_service, feature_registry_with_rag
     ):
         """Test that enabled tool has both generic and specific retrieval."""
         handler = MessageHandler(
@@ -424,6 +437,7 @@ class TestMixedRetrievalModes:
             config=config_with_tool_enabled,
             retrieval_service=mock_retrieval_service,
             embedding_service=mock_embedding_service,
+            feature_registry=feature_registry_with_rag,
         )
 
         # Generic retrieval should still work
@@ -530,7 +544,7 @@ class TestFallbackChain:
 
     def test_fallback_when_tool_unavailable_uses_generic_retrieval(
         self, mock_llm_client, mock_database, config_with_tool_enabled,
-        mock_retrieval_service
+        mock_retrieval_service, feature_registry_with_rag
     ):
         """Test fallback to generic retrieval when tool unavailable."""
         # Tool can't be initialized without embedding service
@@ -540,6 +554,7 @@ class TestFallbackChain:
             config=config_with_tool_enabled,
             retrieval_service=mock_retrieval_service,
             embedding_service=None,
+            feature_registry=feature_registry_with_rag,
         )
 
         # Tool should not be available

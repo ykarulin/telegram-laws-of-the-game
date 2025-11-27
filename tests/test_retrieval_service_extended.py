@@ -19,6 +19,7 @@ class TestRetrievalServiceExtended:
         config.top_k_retrievals = 5
         config.similarity_threshold = 0.55
         config.use_retrieval = True
+        config.rag_dynamic_threshold_margin = None
         return config
 
     @pytest.fixture
