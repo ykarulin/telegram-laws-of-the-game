@@ -80,6 +80,17 @@ class RetrievalService:
                 logger.error("Failed to embed query")
                 return []
 
+            # Log query embedding for debugging dev/prod differences
+            logger.info(
+                f"Query embedding generated for: '{query[:100]}...' "
+                f"(embedding_dims={len(query_embedding)}, "
+                f"first_5={query_embedding[:5]}, "
+                f"last_5={query_embedding[-5:]}, "
+                f"min={min(query_embedding):.4f}, "
+                f"max={max(query_embedding):.4f}, "
+                f"mean={sum(query_embedding) / len(query_embedding):.4f})"
+            )
+
             # Search Qdrant
             results = self.vector_db.search(
                 collection_name=self.config.qdrant_collection_name,
@@ -88,10 +99,24 @@ class RetrievalService:
                 min_score=threshold,
             )
 
-            logger.info(
-                f"Retrieved {len(results)} chunks for query "
-                f"(threshold={threshold}, top_k={top_k})"
-            )
+            # Log retrieval results with embedding similarity details
+            if results:
+                logger.info(
+                    f"Retrieved {len(results)} chunks for query "
+                    f"(threshold={threshold}, top_k={top_k}, "
+                    f"scores=[{', '.join(f'{r.score:.4f}' for r in results)}])"
+                )
+                for i, result in enumerate(results, 1):
+                    logger.debug(
+                        f"  Result {i}: score={result.score:.4f}, "
+                        f"doc={result.metadata.get('document_name', 'unknown')}, "
+                        f"section={result.metadata.get('section', 'unknown')}, "
+                        f"text_preview={result.text[:80]}..."
+                    )
+            else:
+                logger.info(
+                    f"No chunks retrieved for query (threshold={threshold}, top_k={top_k})"
+                )
 
             return results
 

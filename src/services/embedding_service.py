@@ -250,8 +250,20 @@ class EmbeddingService:
         try:
             # Local inference - multilingual-e5-large automatically handles any language
             embedding = self.model.encode(text, convert_to_tensor=False)
-            logger.debug(f"Embedded text ({len(text)} chars) → {len(embedding)} dims")
-            return embedding.tolist()
+            embedding_list = embedding.tolist()
+
+            # Log embedding details for debugging dev/prod differences
+            logger.info(
+                f"Generated embedding: text_length={len(text)} chars, "
+                f"embedding_dims={len(embedding_list)}, "
+                f"first_5_values={embedding_list[:5] if embedding_list else []}, "
+                f"last_5_values={embedding_list[-5:] if embedding_list else []}, "
+                f"min={min(embedding_list) if embedding_list else None:.4f}, "
+                f"max={max(embedding_list) if embedding_list else None:.4f}, "
+                f"mean={sum(embedding_list) / len(embedding_list) if embedding_list else None:.4f}"
+            )
+            logger.debug(f"Embedded text: {text[:100]}...")
+            return embedding_list
         except Exception as e:
             logger.error(f"Failed to embed text: {e}")
             return None
@@ -284,7 +296,7 @@ class EmbeddingService:
             return []
 
         try:
-            logger.info(f"Embedding batch of {len(texts)} texts...")
+            logger.info(f"Embedding batch of {len(texts)} texts (batch_size={batch_size})...")
 
             # Use SentenceTransformer's batch processing
             embeddings = self.model.encode(
@@ -296,7 +308,22 @@ class EmbeddingService:
 
             # Convert numpy array to list of lists
             embeddings_list = [embedding.tolist() for embedding in embeddings]
-            logger.info(f"Successfully embedded {len(embeddings_list)} texts")
+
+            # Log batch statistics for debugging
+            if embeddings_list and all(e is not None for e in embeddings_list):
+                # Calculate per-embedding statistics
+                all_values = []
+                for emb in embeddings_list:
+                    if emb:
+                        all_values.extend(emb)
+
+                logger.info(
+                    f"Successfully embedded {len(embeddings_list)} texts: "
+                    f"dims={len(embeddings_list[0]) if embeddings_list[0] else 0}, "
+                    f"batch_stats_min={min(all_values) if all_values else None:.4f}, "
+                    f"batch_stats_max={max(all_values) if all_values else None:.4f}, "
+                    f"batch_stats_mean={sum(all_values) / len(all_values) if all_values else None:.4f}"
+                )
 
             return embeddings_list
 

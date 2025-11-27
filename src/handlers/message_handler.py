@@ -96,6 +96,11 @@ class MessageHandler:
         try:
             message_data = MessageData.from_telegram_message(update.message)
             logger.debug(f"Processing message: {message_data}")
+            logger.info(
+                f"Incoming user message: user_id={message_data.user_id}, "
+                f"chat_id={message_data.chat_id}, message_id={message_data.message_id}, "
+                f"text_length={len(message_data.text)} chars"
+            )
         except Exception as e:
             logger.error(f"Failed to extract message data: {e}", exc_info=True)
             return
@@ -104,8 +109,21 @@ class MessageHandler:
         conversation_context = self._load_conversation_context(message_data)
 
         # Retrieve relevant documents via RAG if enabled
+        # This triggers embedding generation for semantic search
         retrieved_chunks = self._retrieve_documents(message_data.text)
         retrieved_context = self.retrieval_service.format_context(retrieved_chunks) if retrieved_chunks else ""
+
+        # Log the embedding-based retrieval status
+        if retrieved_chunks:
+            logger.info(
+                f"Embeddings used for RAG: {len(retrieved_chunks)} chunks retrieved, "
+                f"will augment LLM context with semantic search results"
+            )
+        else:
+            logger.info(
+                f"No chunks retrieved via embedding-based search, "
+                f"will use only conversation history (if any) for LLM context"
+            )
 
         # Generate response with typing indicator
         typing_task = asyncio.create_task(send_typing_action_periodically(update, interval=5))
@@ -181,20 +199,38 @@ class MessageHandler:
             logger.debug("Retrieval service not available or disabled")
             return []
 
-        logger.debug(f"Retrieving documents for query: {query[:50]}...")
+        logger.info(f"Starting document retrieval for query: '{query[:100]}...'")
         try:
+            # Retrieve documents (embedding happens internally in retrieve_context)
             retrieved_chunks = self.retrieval_service.retrieve_context(query)
 
             if retrieved_chunks:
-                logger.info(f"Retrieved {len(retrieved_chunks)} chunks")
+                logger.info(
+                    f"Successfully retrieved {len(retrieved_chunks)} chunks for embedding-based search. "
+                    f"Retrieval config: top_k={self.config.top_k_retrievals}, "
+                    f"threshold={self.config.similarity_threshold}"
+                )
                 self._log_retrieval_details(retrieved_chunks)
+
+                # Log embedding-specific details for dev/prod debugging
+                logger.info(
+                    f"Embedding-based retrieval summary: "
+                    f"query_length={len(query)} chars, "
+                    f"chunks_returned={len(retrieved_chunks)}, "
+                    f"similarity_scores={[f'{chunk.score:.4f}' for chunk in retrieved_chunks]}"
+                )
             else:
-                logger.debug("No relevant documents found for query")
+                logger.info(
+                    f"No relevant documents found for query (embedding search completed but no results above threshold). "
+                    f"Query: '{query[:100]}...', "
+                    f"Threshold: {self.config.similarity_threshold}, "
+                    f"Top K: {self.config.top_k_retrievals}"
+                )
 
             return retrieved_chunks
 
         except Exception as e:
-            logger.warning(f"Document retrieval failed (continuing without context): {e}")
+            logger.warning(f"Document retrieval failed (continuing without context): {e}", exc_info=True)
             return []
 
     def _log_retrieval_details(self, retrieved_chunks: List[RetrievedChunk]) -> None:
