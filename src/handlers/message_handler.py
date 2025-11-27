@@ -8,6 +8,7 @@ from src.config import Config
 from src.core.llm import LLMClient, get_system_prompt_with_document_selection
 from src.core.db import ConversationDatabase
 from src.core.conversation import build_conversation_context
+from src.core.features import FeatureRegistry
 from src.core.vector_db import RetrievedChunk
 from src.services.embedding_service import EmbeddingService
 from src.services.retrieval_service import RetrievalService
@@ -35,6 +36,7 @@ class MessageHandler:
         config: Config,
         retrieval_service: Optional[RetrievalService] = None,
         embedding_service: Optional[EmbeddingService] = None,
+        feature_registry: Optional[FeatureRegistry] = None,
     ):
         """Initialize message handler.
 
@@ -44,12 +46,14 @@ class MessageHandler:
             config: Bot configuration
             retrieval_service: Optional retrieval service for RAG (if None, no retrieval)
             embedding_service: Optional embedding service for document lookup tool
+            feature_registry: Optional feature registry for tracking optional features
         """
         self.llm_client = llm_client
         self.db = db
         self.config = config
         self.retrieval_service = retrieval_service
         self.embedding_service = embedding_service
+        self.feature_registry = feature_registry or FeatureRegistry()
 
         # Initialize document lookup tool if both services available
         self.document_lookup_tool: Optional[DocumentLookupTool] = None
@@ -213,6 +217,17 @@ class MessageHandler:
         Returns:
             List of retrieved chunks (empty if retrieval disabled or fails)
         """
+        # Check feature availability explicitly
+        if not self.feature_registry.is_available("rag_retrieval"):
+            state = self.feature_registry.get_feature_state("rag_retrieval")
+            if state:
+                logger.debug(
+                    f"RAG retrieval unavailable: {state.reason}. Status: {state.status.value}"
+                )
+            else:
+                logger.debug("RAG retrieval not registered in feature registry")
+            return []
+
         if not self.retrieval_service or not self.retrieval_service.should_use_retrieval():
             logger.debug("Retrieval service not available or disabled")
             return []

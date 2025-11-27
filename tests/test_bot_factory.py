@@ -4,6 +4,7 @@ from unittest.mock import MagicMock, patch
 from telegram.ext import Application
 from src.bot_factory import create_application
 from src.config import Config, Environment
+from src.core.features import FeatureStatus
 
 
 class TestBotFactory:
@@ -262,3 +263,217 @@ class TestBotFactory:
                         # Verify temperature was passed correctly
                         call_args = mock_llm_class.call_args
                         assert call_args.kwargs["temperature"] == 0.2
+
+
+class TestBotFactoryFeatureRegistry:
+    """Test FeatureRegistry integration in bot factory."""
+
+    @pytest.fixture
+    def mock_config_with_features(self):
+        """Create a mock config for feature registry testing."""
+        config = MagicMock(spec=Config)
+        config.environment = Environment.TESTING
+        config.telegram_bot_token = "123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11"
+        config.openai_api_key = "sk-test-key"
+        config.openai_model = "gpt-4-turbo"
+        config.openai_max_tokens = 4096
+        config.openai_temperature = 0.7
+        config.database_url = "postgresql://test:test@localhost/test"
+        config.qdrant_host = "localhost"
+        config.qdrant_port = 6333
+        config.qdrant_api_key = None
+        config.qdrant_collection_name = "football_documents"
+        config.embedding_model = "text-embedding-3-small"
+        config.top_k_retrievals = 5
+        config.similarity_threshold = 0.55
+        config.enable_document_selection = True
+        return config
+
+    def test_feature_registry_created(self, mock_config_with_features):
+        """Test that feature registry is created during application creation."""
+        with patch("src.bot_factory.LLMClient"):
+            with patch("src.bot_factory.ConversationDatabase"):
+                with patch("src.bot_factory.EmbeddingService"):
+                    with patch("src.bot_factory.RetrievalService"):
+                        with patch("src.bot_factory.MessageHandler") as mock_handler_class:
+                            mock_handler = MagicMock()
+                            mock_handler_class.return_value = mock_handler
+
+                            create_application(mock_config_with_features)
+
+                            # Message handler should receive feature registry
+                            call_args = mock_handler_class.call_args
+                            assert len(call_args[0]) >= 6
+                            feature_registry = call_args[0][5]
+                            assert feature_registry is not None
+
+    def test_rag_retrieval_feature_enabled_when_healthy(self, mock_config_with_features):
+        """Test that rag_retrieval feature is marked as ENABLED when Qdrant is healthy."""
+        with patch("src.bot_factory.LLMClient"):
+            with patch("src.bot_factory.ConversationDatabase"):
+                with patch("src.bot_factory.EmbeddingService") as mock_embed_class:
+                    with patch("src.bot_factory.RetrievalService") as mock_retrieval_class:
+                        with patch("src.bot_factory.MessageHandler") as mock_handler_class:
+                            mock_embed_instance = MagicMock()
+                            mock_embed_class.return_value = mock_embed_instance
+
+                            mock_retrieval_instance = MagicMock()
+                            mock_retrieval_instance.should_use_retrieval.return_value = True
+                            mock_retrieval_class.return_value = mock_retrieval_instance
+
+                            mock_handler = MagicMock()
+                            mock_handler_class.return_value = mock_handler
+
+                            create_application(mock_config_with_features)
+
+                            # Get feature registry from message handler call
+                            feature_registry = mock_handler_class.call_args[0][5]
+                            rag_state = feature_registry.get_feature_state("rag_retrieval")
+
+                            assert rag_state is not None
+                            assert rag_state.status == FeatureStatus.ENABLED
+
+    def test_rag_retrieval_feature_unavailable_on_health_check_failure(
+        self, mock_config_with_features
+    ):
+        """Test that rag_retrieval is UNAVAILABLE when health check fails."""
+        with patch("src.bot_factory.LLMClient"):
+            with patch("src.bot_factory.ConversationDatabase"):
+                with patch("src.bot_factory.EmbeddingService") as mock_embed_class:
+                    with patch("src.bot_factory.RetrievalService") as mock_retrieval_class:
+                        with patch("src.bot_factory.MessageHandler") as mock_handler_class:
+                            mock_embed_instance = MagicMock()
+                            mock_embed_class.return_value = mock_embed_instance
+
+                            # Health check returns False
+                            mock_retrieval_instance = MagicMock()
+                            mock_retrieval_instance.should_use_retrieval.return_value = False
+                            mock_retrieval_class.return_value = mock_retrieval_instance
+
+                            mock_handler = MagicMock()
+                            mock_handler_class.return_value = mock_handler
+
+                            create_application(mock_config_with_features)
+
+                            # Get feature registry
+                            feature_registry = mock_handler_class.call_args[0][5]
+                            rag_state = feature_registry.get_feature_state("rag_retrieval")
+
+                            assert rag_state is not None
+                            assert rag_state.status == FeatureStatus.UNAVAILABLE
+
+    def test_rag_retrieval_feature_unavailable_on_exception(
+        self, mock_config_with_features
+    ):
+        """Test that rag_retrieval is UNAVAILABLE when initialization raises exception."""
+        with patch("src.bot_factory.LLMClient"):
+            with patch("src.bot_factory.ConversationDatabase"):
+                with patch("src.bot_factory.EmbeddingService") as mock_embed_class:
+                    with patch("src.bot_factory.RetrievalService") as mock_retrieval_class:
+                        with patch("src.bot_factory.MessageHandler") as mock_handler_class:
+                            # Embedding service works
+                            mock_embed_class.return_value = MagicMock()
+
+                            # Retrieval service fails
+                            mock_retrieval_class.side_effect = Exception("Qdrant connection failed")
+
+                            mock_handler = MagicMock()
+                            mock_handler_class.return_value = mock_handler
+
+                            create_application(mock_config_with_features)
+
+                            # Get feature registry
+                            feature_registry = mock_handler_class.call_args[0][5]
+                            rag_state = feature_registry.get_feature_state("rag_retrieval")
+
+                            assert rag_state is not None
+                            assert rag_state.status == FeatureStatus.UNAVAILABLE
+                            assert "Initialization failed" in rag_state.reason
+
+    def test_document_selection_feature_enabled(self, mock_config_with_features):
+        """Test that document_selection feature is ENABLED when all conditions met."""
+        with patch("src.bot_factory.LLMClient"):
+            with patch("src.bot_factory.ConversationDatabase"):
+                with patch("src.bot_factory.EmbeddingService") as mock_embed_class:
+                    with patch("src.bot_factory.RetrievalService") as mock_retrieval_class:
+                        with patch("src.bot_factory.MessageHandler") as mock_handler_class:
+                            mock_embed_class.return_value = MagicMock()
+                            mock_retrieval_instance = MagicMock()
+                            mock_retrieval_instance.should_use_retrieval.return_value = True
+                            mock_retrieval_class.return_value = mock_retrieval_instance
+
+                            mock_handler = MagicMock()
+                            mock_handler_class.return_value = mock_handler
+
+                            create_application(mock_config_with_features)
+
+                            feature_registry = mock_handler_class.call_args[0][5]
+                            doc_sel_state = feature_registry.get_feature_state(
+                                "document_selection"
+                            )
+
+                            assert doc_sel_state is not None
+                            assert doc_sel_state.status == FeatureStatus.ENABLED
+
+    def test_document_selection_feature_disabled_by_config(self, mock_config_with_features):
+        """Test that document_selection feature is DISABLED when config disables it."""
+        mock_config_with_features.enable_document_selection = False
+
+        with patch("src.bot_factory.LLMClient"):
+            with patch("src.bot_factory.ConversationDatabase"):
+                with patch("src.bot_factory.EmbeddingService"):
+                    with patch("src.bot_factory.RetrievalService"):
+                        with patch("src.bot_factory.MessageHandler") as mock_handler_class:
+                            mock_handler = MagicMock()
+                            mock_handler_class.return_value = mock_handler
+
+                            create_application(mock_config_with_features)
+
+                            feature_registry = mock_handler_class.call_args[0][5]
+                            doc_sel_state = feature_registry.get_feature_state(
+                                "document_selection"
+                            )
+
+                            assert doc_sel_state is not None
+                            assert doc_sel_state.status == FeatureStatus.DISABLED
+
+    def test_document_selection_feature_unavailable_without_retrieval(
+        self, mock_config_with_features
+    ):
+        """Test that document_selection is UNAVAILABLE without retrieval service."""
+        with patch("src.bot_factory.LLMClient"):
+            with patch("src.bot_factory.ConversationDatabase"):
+                with patch("src.bot_factory.EmbeddingService"):
+                    with patch("src.bot_factory.RetrievalService") as mock_retrieval_class:
+                        with patch("src.bot_factory.MessageHandler") as mock_handler_class:
+                            # Retrieval service fails
+                            mock_retrieval_class.side_effect = Exception("Failed")
+
+                            mock_handler = MagicMock()
+                            mock_handler_class.return_value = mock_handler
+
+                            create_application(mock_config_with_features)
+
+                            feature_registry = mock_handler_class.call_args[0][5]
+                            doc_sel_state = feature_registry.get_feature_state(
+                                "document_selection"
+                            )
+
+                            assert doc_sel_state is not None
+                            assert doc_sel_state.status == FeatureStatus.UNAVAILABLE
+
+    def test_feature_registry_summary_logged(self, mock_config_with_features):
+        """Test that feature registry summary is logged on creation."""
+        with patch("src.bot_factory.LLMClient"):
+            with patch("src.bot_factory.ConversationDatabase"):
+                with patch("src.bot_factory.EmbeddingService"):
+                    with patch("src.bot_factory.RetrievalService"):
+                        with patch("src.bot_factory.logger") as mock_logger:
+                            create_application(mock_config_with_features)
+
+                            # Verify summary logging was called
+                            info_calls = [
+                                call[0][0] for call in mock_logger.info.call_args_list
+                            ]
+                            # Should log feature availability summary
+                            assert any("Feature availability" in call for call in info_calls)
