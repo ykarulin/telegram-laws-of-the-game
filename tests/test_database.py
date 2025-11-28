@@ -506,3 +506,128 @@ class TestDatabaseIntegration:
         chain2 = temp_db.get_conversation_chain(201, chat_id, 2)
         assert len(chain2) == 2
         assert all(msg.message_id in [200, 201] for msg in chain2)
+
+
+class TestLargeTelegramIDs:
+    """Regression tests for handling large Telegram IDs (64-bit integers)."""
+
+    def test_save_and_retrieve_large_chat_id(self, temp_db):
+        """Test that large chat IDs (exceeding 32-bit limit) are handled correctly.
+
+        Telegram chat IDs can be 64-bit signed integers. This test verifies
+        that the database correctly stores and retrieves chat IDs that exceed
+        the 32-bit signed integer limit (2,147,483,647).
+
+        Regression test for: https://github.com/issue/large-chat-id-overflow
+        """
+        # Chat ID: 5872238465 (exceeds 32-bit limit)
+        large_chat_id = 5872238465
+        message_id = 150
+        user_id = 12345
+
+        # Save message with large chat ID
+        temp_db.save_message(
+            message_id=message_id,
+            chat_id=large_chat_id,
+            sender_type="user",
+            sender_id=user_id,
+            text="Test message with large chat ID",
+        )
+
+        # Retrieve and verify
+        msg = temp_db.get_message(message_id, large_chat_id)
+        assert msg is not None
+        assert msg.message_id == message_id
+        assert msg.chat_id == large_chat_id
+        assert msg.sender_id == str(user_id)
+        assert msg.text == "Test message with large chat ID"
+
+    def test_large_message_id(self, temp_db):
+        """Test that large message IDs (64-bit) are handled correctly."""
+        chat_id = 12345
+        # Large message ID (within BIGINT range: -9223372036854775808 to 9223372036854775807)
+        large_message_id = 4999999999999999  # Large but within range
+        user_id = 100
+
+        temp_db.save_message(
+            message_id=large_message_id,
+            chat_id=chat_id,
+            sender_type="user",
+            sender_id=user_id,
+            text="Message with large ID",
+        )
+
+        msg = temp_db.get_message(large_message_id, chat_id)
+        assert msg is not None
+        assert msg.message_id == large_message_id
+
+    def test_large_reply_to_message_id(self, temp_db):
+        """Test that large reply_to_message_id values are handled correctly."""
+        chat_id = 5872238465  # Large chat ID
+        user_id = 100
+
+        # First message with large message ID
+        large_message_id = 2999999999
+        temp_db.save_message(
+            message_id=large_message_id,
+            chat_id=chat_id,
+            sender_type="user",
+            sender_id=user_id,
+            text="Original message",
+        )
+
+        # Reply with another large message ID
+        reply_message_id = 3000000000
+        temp_db.save_message(
+            message_id=reply_message_id,
+            chat_id=chat_id,
+            sender_type="bot",
+            sender_id="gpt-5-mini",
+            text="Bot response",
+            reply_to_message_id=large_message_id,
+        )
+
+        msg = temp_db.get_message(reply_message_id, chat_id)
+        assert msg.reply_to_message_id == large_message_id
+
+    def test_conversation_chain_with_large_ids(self, temp_db):
+        """Test conversation chain building with large Telegram IDs."""
+        large_chat_id = 5872238465
+        user_id = 100
+
+        # Build a conversation chain with large IDs
+        msg1_id = 2999999999
+        temp_db.save_message(
+            message_id=msg1_id,
+            chat_id=large_chat_id,
+            sender_type="user",
+            sender_id=user_id,
+            text="User question",
+        )
+
+        msg2_id = 3000000000
+        temp_db.save_message(
+            message_id=msg2_id,
+            chat_id=large_chat_id,
+            sender_type="bot",
+            sender_id="gpt-5-mini",
+            text="Bot answer",
+            reply_to_message_id=msg1_id,
+        )
+
+        msg3_id = 3000000001
+        temp_db.save_message(
+            message_id=msg3_id,
+            chat_id=large_chat_id,
+            sender_type="user",
+            sender_id=user_id,
+            text="Follow-up",
+            reply_to_message_id=msg2_id,
+        )
+
+        # Get chain from last message
+        chain = temp_db.get_conversation_chain(msg3_id, large_chat_id, user_id)
+        assert len(chain) == 3
+        assert chain[0].message_id == msg1_id
+        assert chain[1].message_id == msg2_id
+        assert chain[2].message_id == msg3_id

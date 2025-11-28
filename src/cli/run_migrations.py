@@ -39,6 +39,7 @@ def run_migrations():
             "migrations/002_add_documents_table.sql",
             "migrations/003_add_relative_path_to_documents.sql",
             "migrations/004_rename_metadata_column.sql",
+            "migrations/005_convert_telegram_ids_to_bigint.sql",
         ]
 
         for migration_file in files:

@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from contextlib import contextmanager
 from enum import Enum
 
-from sqlalchemy import create_engine, Column, Integer, String, Text, DateTime, ForeignKey, select, desc, and_, JSON
+from sqlalchemy import create_engine, Column, Integer, BigInteger, String, Text, DateTime, ForeignKey, select, desc, and_, JSON
 from sqlalchemy.orm import sessionmaker, declarative_base, Session, relationship
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError, OperationalError
 
@@ -29,12 +29,12 @@ class MessageModel(Base):
     __tablename__ = "messages"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    message_id = Column(Integer, nullable=False, index=True)  # Telegram message ID
-    chat_id = Column(Integer, nullable=False, index=True)  # Telegram chat ID (supports multi-user/multi-chat)
+    message_id = Column(BigInteger, nullable=False, index=True)  # Telegram message ID (64-bit)
+    chat_id = Column(BigInteger, nullable=False, index=True)  # Telegram chat ID (64-bit, supports multi-user/multi-chat)
     sender_type = Column(String(10), nullable=False)  # 'user' or 'bot'
     sender_id = Column(String(255), nullable=False, index=True)  # user_id (if user) or bot model name (if bot)
     text = Column(Text, nullable=False)
-    reply_to_message_id = Column(Integer, nullable=True, index=True)  # References any previous message (user or bot)
+    reply_to_message_id = Column(BigInteger, nullable=True, index=True)  # References any previous message (user or bot) (64-bit)
     timestamp = Column(DateTime(timezone=True), default=utc_now, nullable=False, index=True)
 
     def __repr__(self) -> str:
