@@ -26,6 +26,8 @@ class Config:
     openai_max_tokens: int
     openai_temperature: float
     database_url: str
+    # Admin Configuration
+    admin_user_ids: list[int] = None
     # Telegram Webhook Configuration (optional)
     telegram_webhook_url: str = None
     telegram_webhook_port: int = 8443
@@ -143,6 +145,15 @@ class Config:
         webhook_port = int(os.getenv("TELEGRAM_WEBHOOK_PORT", "8443")) if webhook_url else 8443
         webhook_secret_token = os.getenv("TELEGRAM_WEBHOOK_SECRET_TOKEN")
 
+        # Parse admin user IDs from comma-separated environment variable
+        admin_ids_str = os.getenv("ADMIN_USER_IDS", "")
+        admin_user_ids = None
+        if admin_ids_str:
+            try:
+                admin_user_ids = [int(uid.strip()) for uid in admin_ids_str.split(",") if uid.strip()]
+            except ValueError:
+                raise ConfigError(f"ADMIN_USER_IDS must be comma-separated integers, got: {admin_ids_str}")
+
         return cls(
             environment=environment,
             telegram_bot_token=token,
@@ -153,6 +164,7 @@ class Config:
             openai_max_tokens=int(os.getenv("OPENAI_MAX_TOKENS", "4096")),
             openai_temperature=float(os.getenv("OPENAI_TEMPERATURE", "0.7")),
             database_url=database_url,
+            admin_user_ids=admin_user_ids,
             telegram_webhook_url=webhook_url,
             telegram_webhook_port=webhook_port,
             telegram_webhook_secret_token=webhook_secret_token,

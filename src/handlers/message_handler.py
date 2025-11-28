@@ -12,6 +12,7 @@ from src.core.features import FeatureRegistry
 from src.core.vector_db import RetrievedChunk
 from src.services.embedding_service import EmbeddingService
 from src.services.retrieval_service import RetrievalService
+from src.services.admin_service import AdminService
 from src.tools.document_lookup_tool import DocumentLookupTool
 from src.handlers.typing_indicator import send_typing_action_periodically
 from src.models.message_data import MessageData
@@ -37,6 +38,7 @@ class MessageHandler:
         retrieval_service: Optional[RetrievalService] = None,
         embedding_service: Optional[EmbeddingService] = None,
         feature_registry: Optional[FeatureRegistry] = None,
+        admin_service: Optional[AdminService] = None,
     ):
         """Initialize message handler.
 
@@ -47,6 +49,7 @@ class MessageHandler:
             retrieval_service: Optional retrieval service for RAG (if None, no retrieval)
             embedding_service: Optional embedding service for document lookup tool
             feature_registry: Optional feature registry for tracking optional features
+            admin_service: Optional admin service for sending notifications to admins
         """
         self.llm_client = llm_client
         self.db = db
@@ -54,6 +57,7 @@ class MessageHandler:
         self.retrieval_service = retrieval_service
         self.embedding_service = embedding_service
         self.feature_registry = feature_registry or FeatureRegistry()
+        self.admin_service = admin_service
 
         # Initialize document lookup tool if both services available
         self.document_lookup_tool: Optional[DocumentLookupTool] = None
@@ -123,6 +127,10 @@ class MessageHandler:
                 f"chat_id={message_data.chat_id}, message_id={message_data.message_id}, "
                 f"text_length={len(message_data.text)} chars"
             )
+
+            # Send debug notification to admins about incoming message
+            if self.admin_service:
+                asyncio.create_task(self._notify_admins_incoming_message(message_data))
         except Exception as e:
             logger.error(f"Failed to extract message data: {e}", exc_info=True)
             return
@@ -161,10 +169,22 @@ class MessageHandler:
             # Send and persist messages
             await self._send_and_persist(update, message_data, bot_response, retrieved_chunks)
 
+            # Send info notification to admins about response sent
+            if self.admin_service:
+                asyncio.create_task(
+                    self._notify_admins_info(message_data.user_id, bot_response)
+                )
+
         except LLMError as e:
             error_msg = str(e)
             logger.error(f"LLM error for user {message_data.user_id}: {error_msg}")
             await update.message.reply_text(f"Sorry, I encountered an error: {error_msg}")
+
+            # Send error notification to admins
+            if self.admin_service:
+                asyncio.create_task(
+                    self._notify_admins_error(message_data.user_id, error_msg)
+                )
 
         finally:
             # Cancel typing indicator
@@ -469,6 +489,68 @@ class MessageHandler:
             f"Sent response to user {message_data.user_id}: "
             f"user_msg={message_data.message_id}, bot_msg={bot_message_id}"
         )
+
+    async def _notify_admins_incoming_message(self, message_data: MessageData) -> None:
+        """Send debug notification to admins about incoming message.
+
+        Args:
+            message_data: Extracted message data
+        """
+        if not self.admin_service or not self.admin_service.admin_user_ids:
+            return
+
+        for admin_id in self.admin_service.admin_user_ids:
+            try:
+                await self.admin_service.send_debug_notification(
+                    admin_id,
+                    "incoming_message",
+                    {
+                        "user_id": message_data.user_id,
+                        "text": message_data.text,
+                    }
+                )
+            except Exception as e:
+                logger.debug(f"Failed to send incoming message notification to admin {admin_id}: {e}")
+
+    async def _notify_admins_info(self, user_id: int, response_text: str) -> None:
+        """Send info notification to admins about bot response.
+
+        Args:
+            user_id: Telegram user ID who received the response
+            response_text: Bot's response text
+        """
+        if not self.admin_service or not self.admin_service.admin_user_ids:
+            return
+
+        for admin_id in self.admin_service.admin_user_ids:
+            try:
+                await self.admin_service.send_info_notification(
+                    admin_id,
+                    user_id,
+                    response_text
+                )
+            except Exception as e:
+                logger.debug(f"Failed to send info notification to admin {admin_id}: {e}")
+
+    async def _notify_admins_error(self, user_id: int, error_message: str) -> None:
+        """Send error notification to admins about error.
+
+        Args:
+            user_id: Telegram user ID who caused the error
+            error_message: Error message
+        """
+        if not self.admin_service or not self.admin_service.admin_user_ids:
+            return
+
+        for admin_id in self.admin_service.admin_user_ids:
+            try:
+                await self.admin_service.send_error_notification(
+                    admin_id,
+                    error_message,
+                    user_id
+                )
+            except Exception as e:
+                logger.debug(f"Failed to send error notification to admin {admin_id}: {e}")
 
     def _append_citations(self, response: str, retrieved_chunks: List[RetrievedChunk]) -> str:
         """

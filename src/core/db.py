@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 from typing import Optional, List
 from dataclasses import dataclass
 from contextlib import contextmanager
+from enum import Enum
 
 from sqlalchemy import create_engine, Column, Integer, String, Text, DateTime, ForeignKey, select, desc, and_, JSON
 from sqlalchemy.orm import sessionmaker, declarative_base, Session, relationship
@@ -68,6 +69,27 @@ class DocumentModel(Base):
             f"DocumentModel(id={self.id}, name={self.name}, type={self.document_type}, "
             f"status={self.qdrant_status}, version={self.version})"
         )
+
+
+class MonitoringLevel(Enum):
+    """Monitoring levels for admin notifications."""
+    ERROR = "error"
+    INFO = "info"
+    DEBUG = "debug"
+
+
+class AdminPreferenceModel(Base):
+    """SQLAlchemy model for admin preferences table (tracks monitoring level per admin)."""
+    __tablename__ = "admin_preferences"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, nullable=False, unique=True, index=True)  # Telegram user ID
+    monitoring_level = Column(String(10), nullable=False, default='error')  # error, info, debug
+    created_at = Column(DateTime(timezone=True), default=utc_now, nullable=False, index=True)
+    updated_at = Column(DateTime(timezone=True), default=utc_now, onupdate=utc_now, nullable=False, index=True)
+
+    def __repr__(self) -> str:
+        return f"AdminPreferenceModel(user_id={self.user_id}, monitoring_level={self.monitoring_level})"
 
 
 @dataclass
@@ -459,6 +481,97 @@ class ConversationDatabase:
             raise
         except Exception as e:
             logger.error(f"Unexpected error deleting messages: {e}", exc_info=True)
+            raise
+
+    def get_or_create_admin_preference(self, user_id: int, default_level: str = "error") -> AdminPreferenceModel:
+        """Get or create admin preference for a user.
+
+        Args:
+            user_id: Telegram user ID
+            default_level: Default monitoring level if creating new preference
+
+        Returns:
+            AdminPreferenceModel instance
+        """
+        try:
+            with self.get_session() as session:
+                pref = session.query(AdminPreferenceModel).filter(
+                    AdminPreferenceModel.user_id == user_id
+                ).first()
+
+                if pref:
+                    return pref
+
+                # Create new preference with default level
+                new_pref = AdminPreferenceModel(
+                    user_id=user_id,
+                    monitoring_level=default_level
+                )
+                session.add(new_pref)
+                logger.info(f"Created admin preference for user {user_id} with level {default_level}")
+                return new_pref
+        except SQLAlchemyError as e:
+            logger.error(f"Database error getting or creating admin preference for {user_id}: {e}", exc_info=True)
+            raise
+        except Exception as e:
+            logger.error(f"Unexpected error getting or creating admin preference for {user_id}: {e}", exc_info=True)
+            raise
+
+    def update_admin_monitoring_level(self, user_id: int, level: str) -> AdminPreferenceModel:
+        """Update admin monitoring level.
+
+        Args:
+            user_id: Telegram user ID
+            level: New monitoring level (error, info, debug)
+
+        Returns:
+            Updated AdminPreferenceModel instance
+        """
+        if level not in [l.value for l in MonitoringLevel]:
+            raise ValueError(f"Invalid monitoring level: {level}. Must be one of: {[l.value for l in MonitoringLevel]}")
+
+        try:
+            with self.get_session() as session:
+                pref = session.query(AdminPreferenceModel).filter(
+                    AdminPreferenceModel.user_id == user_id
+                ).first()
+
+                if not pref:
+                    raise ValueError(f"No admin preference found for user {user_id}")
+
+                pref.monitoring_level = level
+                logger.info(f"Updated monitoring level for admin {user_id} to {level}")
+                return pref
+        except SQLAlchemyError as e:
+            logger.error(f"Database error updating admin monitoring level for {user_id}: {e}", exc_info=True)
+            raise
+        except Exception as e:
+            logger.error(f"Unexpected error updating admin monitoring level for {user_id}: {e}", exc_info=True)
+            raise
+
+    def get_admin_monitoring_level(self, user_id: int) -> Optional[str]:
+        """Get admin monitoring level.
+
+        Args:
+            user_id: Telegram user ID
+
+        Returns:
+            Monitoring level (error, info, debug) or None if not set
+        """
+        try:
+            with self.get_session() as session:
+                pref = session.query(AdminPreferenceModel).filter(
+                    AdminPreferenceModel.user_id == user_id
+                ).first()
+
+                if pref:
+                    return pref.monitoring_level
+                return None
+        except SQLAlchemyError as e:
+            logger.error(f"Database error getting admin monitoring level for {user_id}: {e}", exc_info=True)
+            raise
+        except Exception as e:
+            logger.error(f"Unexpected error getting admin monitoring level for {user_id}: {e}", exc_info=True)
             raise
 
     def close(self) -> None:

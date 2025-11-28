@@ -1,13 +1,15 @@
 """Bot application factory for creating and configuring the Telegram bot."""
 import logging
-from telegram.ext import Application, MessageHandler as TelegramMessageHandler, filters
+from telegram.ext import Application, MessageHandler as TelegramMessageHandler, CommandHandler, filters
 from src.config import Config
 from src.core.llm import LLMClient
 from src.core.db import ConversationDatabase
 from src.core.features import FeatureRegistry, FeatureStatus
 from src.handlers.message_handler import MessageHandler
+from src.handlers.admin_handler import AdminHandler
 from src.services.embedding_service import EmbeddingService
 from src.services.retrieval_service import RetrievalService
+from src.services.admin_service import AdminService
 
 logger = logging.getLogger(__name__)
 
@@ -98,12 +100,20 @@ def create_application(config: Config) -> Application:
     # Log feature availability summary
     feature_registry.log_summary()
 
+    # Create application first to get bot instance
+    application = Application.builder().token(config.telegram_bot_token).build()
+
+    # Initialize AdminService
+    admin_service = AdminService(db, application.bot, config.admin_user_ids)
+    admin_handler_instance = AdminHandler(admin_service)
+
     message_handler_instance = MessageHandler(
-        llm_client, db, config, retrieval_service, embedding_service, feature_registry
+        llm_client, db, config, retrieval_service, embedding_service, feature_registry, admin_service
     )
 
-    # Create application
-    application = Application.builder().token(config.telegram_bot_token).build()
+    # Register admin command handlers (for DMs only)
+    application.add_handler(CommandHandler("monitor", admin_handler_instance.handle_monitor_command))
+    application.add_handler(CommandHandler("help", admin_handler_instance.handle_help_command))
 
     # Register message handler for text messages (excluding commands)
     application.add_handler(
@@ -112,6 +122,9 @@ def create_application(config: Config) -> Application:
             message_handler_instance.handle
         )
     )
+
+    # Store admin_service in application context for use by message handler
+    application.admin_service = admin_service
 
     logger.info(f"Bot created: {config.environment.value} environment")
     return application
