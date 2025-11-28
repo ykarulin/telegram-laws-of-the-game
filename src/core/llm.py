@@ -60,6 +60,7 @@ def get_system_prompt_with_document_selection(
         True
     """
     current_datetime = datetime.now(timezone.utc).strftime("%A, %B %d, %Y at %I:%M %p GMT")
+    logger.debug(f"System prompt documents:\n{document_list if document_list else '[No documents available]'}")
 
     base_guidelines = """You are an expert in football (soccer) rules.
 Current date and time (GMT): {datetime}
@@ -67,7 +68,8 @@ Current date and time (GMT): {datetime}
 CORE GUIDELINES:
 - Only answer questions about football (soccer) rules, laws of the game, VAR procedures, and related regulations.
 - Reject off-topic questions politely without offering to help with non-football topics.
-- Answer questions clearly and accurately based on the Laws of the Game.
+- Answer questions clearly and accurately based on the Laws of the Game and official documents provided.
+- Always use the lookup_documents tool to search for information in the available documents before answering.
 - Keep responses concise and informative.
 - If you're unsure about a rule, say so explicitly.
 - Do NOT end your response by prompting the user for follow-up questions or asking for scenarios.
