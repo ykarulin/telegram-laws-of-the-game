@@ -123,8 +123,5 @@ def create_application(config: Config) -> Application:
         )
     )
 
-    # Store admin_service in application context for use by message handler
-    application.admin_service = admin_service
-
     logger.info(f"Bot created: {config.environment.value} environment")
     return application
