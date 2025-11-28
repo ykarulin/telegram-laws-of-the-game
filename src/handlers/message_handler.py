@@ -427,6 +427,18 @@ class MessageHandler:
             len(conversation_context) if conversation_context else 0,
         )
 
+        # Create tool executor function if tools are enabled
+        tool_executor = None
+        if self.document_lookup_tool and tools:
+            def tool_executor_wrapper(tool_name: str, **kwargs) -> str:
+                """Execute tool and return formatted result for LLM."""
+                if tool_name == "lookup_documents":
+                    result = self.document_lookup_tool.execute_lookup(**kwargs)
+                    return self.document_lookup_tool.format_result_for_llm(result)
+                else:
+                    return f"Unknown tool: {tool_name}"
+            tool_executor = tool_executor_wrapper
+
         # Run LLM call in executor to keep event loop non-blocking
         loop = asyncio.get_event_loop()
         bot_response = await loop.run_in_executor(
@@ -436,6 +448,7 @@ class MessageHandler:
             augmented_context,
             system_prompt,
             tools,
+            tool_executor,
         )
         debug_log_llm_response(logger, len(bot_response))
 

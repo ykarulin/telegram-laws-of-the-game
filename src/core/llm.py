@@ -1,6 +1,8 @@
 """LLM integration module for OpenAI API."""
 import logging
+import json
 from datetime import datetime, timezone
+from typing import Optional, List, Dict, Any
 from openai import OpenAI, APIError, RateLimitError, APIConnectionError
 from src.exceptions import LLMError
 from src.constants import TelegramLimits
@@ -151,8 +153,10 @@ class LLMClient:
         conversation_context: list = None,
         system_prompt: str = None,
         tools: list = None,
+        tool_executor=None,
+        max_tool_iterations: int = 10,
     ) -> str:
-        """Generate a response using OpenAI API.
+        """Generate a response using OpenAI API with support for tool calling.
 
         Args:
             user_message: The user's input message
@@ -161,6 +165,9 @@ class LLMClient:
                                  Will be inserted between system prompt and current user message.
             system_prompt: Optional custom system prompt. If None, uses default get_system_prompt()
             tools: Optional list of tool definitions for function calling (OpenAI format)
+            tool_executor: Optional callable that executes tool calls. Should accept (tool_name, **kwargs)
+                          and return formatted result string. If None, tool calling will be skipped.
+            max_tool_iterations: Maximum number of tool call iterations (default: 10)
 
         Returns:
             Generated response text, truncated to Telegram limit if necessary
@@ -184,15 +191,60 @@ class LLMClient:
             # Add current user message
             messages.append({"role": "user", "content": user_message})
 
-            # Build the request parameters
+            # Run the agentic loop (tool calling + response generation)
+            return self._generate_with_tools(
+                messages=messages,
+                tools=tools,
+                tool_executor=tool_executor,
+                max_tool_iterations=max_tool_iterations,
+            )
+
+        except RateLimitError:
+            logger.error("Rate limit exceeded. Please try again later.")
+            raise LLMError("Rate limit exceeded. Please try again later.")
+        except APIConnectionError as e:
+            logger.error(f"OpenAI API connection error: {e}")
+            raise LLMError("Failed to connect to OpenAI API. Please try again later.")
+        except APIError as e:
+            logger.error(f"OpenAI API error: {e}")
+            raise LLMError(f"OpenAI API error: {str(e)}")
+        except Exception as e:
+            logger.error(f"Unexpected error during LLM generation: {e}")
+            raise LLMError("An unexpected error occurred. Please try again later.")
+
+    def _generate_with_tools(
+        self,
+        messages: list,
+        tools: list = None,
+        tool_executor=None,
+        max_tool_iterations: int = 10,
+    ) -> str:
+        """Internal method to handle agentic loop for tool calling.
+
+        Args:
+            messages: List of messages to send to LLM
+            tools: Optional tool definitions
+            tool_executor: Optional function to execute tools
+            max_tool_iterations: Maximum iterations for tool calling loop
+
+        Returns:
+            Generated response text
+        """
+        iteration = 0
+
+        while iteration < max_tool_iterations:
+            iteration += 1
+            logger.debug(f"LLM iteration {iteration}")
+
+            # Build request parameters
             request_params = {
                 "model": self.model,
                 "messages": messages,
                 "temperature": self.temperature,
             }
 
-            # Add tools if provided
-            if tools:
+            # Add tools if provided and we haven't exceeded max iterations
+            if tools and iteration < max_tool_iterations:
                 request_params["tools"] = tools
                 logger.debug(f"Added {len(tools)} tool definitions to request")
 
@@ -220,44 +272,97 @@ class LLMClient:
                         request_params["max_tokens"] = self.max_tokens
                     response = self.client.chat.completions.create(**request_params)
                 else:
-                    # Log the error details for debugging
                     logger.error(f"OpenAI API error: {error_str}")
                     logger.debug(f"Request params: model={request_params.get('model')}, messages count={len(request_params.get('messages', []))}")
-                    # Re-raise if it's a different error
                     raise
 
-            # Extract the response text
-            # Handle case where model uses tool calling and returns None for content
-            reply_text = response.choices[0].message.content
-            if reply_text is None:
-                # Model decided to call a tool instead of responding directly
-                logger.warning("Model returned tool call instead of text content")
-                raise LLMError("Model attempted to use tool calling when direct response was expected. This may indicate an issue with the tool configuration or model behavior.")
+            # Check if response has content (direct answer)
+            response_message = response.choices[0].message
+            if response_message.content:
+                reply_text = response_message.content.strip()
+                logger.debug(f"Generated response ({len(reply_text)} chars) after {iteration} iteration(s)")
 
-            reply_text = reply_text.strip()
-            logger.debug(f"Generated response ({len(reply_text)} chars)")
+                # Truncate to Telegram message limit
+                if len(reply_text) > TelegramLimits.MAX_MESSAGE_LENGTH:
+                    logger.warning(
+                        f"Response truncated from {len(reply_text)} to {TelegramLimits.MAX_MESSAGE_LENGTH} chars"
+                    )
+                    reply_text = reply_text[: TelegramLimits.MAX_MESSAGE_LENGTH - 3] + "..."
 
-            # Truncate to Telegram message limit
-            if len(reply_text) > TelegramLimits.MAX_MESSAGE_LENGTH:
-                logger.warning(
-                    f"Response truncated from {len(reply_text)} to {TelegramLimits.MAX_MESSAGE_LENGTH} chars"
-                )
-                reply_text = reply_text[: TelegramLimits.MAX_MESSAGE_LENGTH - 3] + "..."
+                return reply_text
 
-            return reply_text
+            # Check if model is calling a tool
+            if response_message.tool_calls:
+                if not tool_executor:
+                    logger.warning("Model attempted to call tool but no tool_executor provided")
+                    raise LLMError("Model attempted to use tools but tool executor is not available.")
 
-        except RateLimitError:
-            logger.error("Rate limit exceeded. Please try again later.")
-            raise LLMError("Rate limit exceeded. Please try again later.")
-        except APIConnectionError as e:
-            logger.error(f"OpenAI API connection error: {e}")
-            raise LLMError("Failed to connect to OpenAI API. Please try again later.")
-        except APIError as e:
-            logger.error(f"OpenAI API error: {e}")
-            raise LLMError(f"OpenAI API error: {str(e)}")
+                logger.info(f"Model made {len(response_message.tool_calls)} tool call(s)")
+
+                # Add assistant message with tool calls to conversation
+                messages.append({"role": "assistant", "content": None, "tool_calls": response_message.tool_calls})
+
+                # Execute each tool call and collect results
+                tool_results = []
+                for tool_call in response_message.tool_calls:
+                    tool_result = self._execute_tool_call(tool_call, tool_executor)
+                    tool_results.append(tool_result)
+
+                # Add tool results to messages
+                for tool_result in tool_results:
+                    messages.append(tool_result)
+
+                # Continue loop to get LLM response based on tool results
+                continue
+
+            # If we reach here, model returned neither content nor tool calls
+            logger.error("Model response contained neither content nor tool calls")
+            raise LLMError("Model returned an invalid response with no content or tool calls.")
+
+        # Max iterations exceeded
+        logger.error(f"Max tool iterations ({max_tool_iterations}) exceeded")
+        raise LLMError(f"Tool calling loop exceeded maximum iterations ({max_tool_iterations}). Please try again.")
+
+    def _execute_tool_call(self, tool_call, tool_executor) -> dict:
+        """Execute a single tool call and return the result message.
+
+        Args:
+            tool_call: OpenAI tool_call object with id, type, and function info
+            tool_executor: Callable that executes the tool
+
+        Returns:
+            Tool result message dict for the OpenAI API
+        """
+        tool_call_id = tool_call.id
+        function_name = tool_call.function.name
+
+        try:
+            # Parse function arguments
+            arguments = json.loads(tool_call.function.arguments)
+        except json.JSONDecodeError as e:
+            logger.error(f"Failed to parse tool arguments for {function_name}: {e}")
+            result_text = f"Error: Failed to parse tool arguments: {str(e)}"
+            return {
+                "role": "tool",
+                "tool_call_id": tool_call_id,
+                "content": result_text,
+            }
+
+        logger.info(f"Executing tool: {function_name} with arguments: {arguments}")
+
+        try:
+            # Execute the tool
+            result_text = tool_executor(function_name, **arguments)
+            logger.info(f"Tool {function_name} executed successfully")
         except Exception as e:
-            logger.error(f"Unexpected error during LLM generation: {e}")
-            raise LLMError("An unexpected error occurred. Please try again later.")
+            logger.error(f"Tool execution failed for {function_name}: {e}", exc_info=True)
+            result_text = f"Error executing tool: {str(e)}"
+
+        return {
+            "role": "tool",
+            "tool_call_id": tool_call_id,
+            "content": result_text,
+        }
 
     def count_tokens_estimate(self, text: str) -> int:
         """Estimate token count (rough approximation).

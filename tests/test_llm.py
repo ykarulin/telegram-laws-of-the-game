@@ -287,32 +287,90 @@ class TestLLMClient:
         """Test that Telegram message limit is set correctly."""
         assert TelegramLimits.MAX_MESSAGE_LENGTH == 4096
 
-    def test_generate_response_handles_none_content_from_tool_calling(self):
-        """Test handling of None content when model uses tool calling.
-
-        This is a regression test for the error:
-        'NoneType' object has no attribute 'strip'
+    def test_generate_response_handles_tool_calling_with_executor(self):
+        """Test agentic loop that handles tool calls with an executor.
 
         When the OpenAI API is used with function calling tools, the model may
-        decide to call a tool instead of responding with text. In this case,
-        response.choices[0].message.content is None, and calling .strip() on it
-        raises an AttributeError.
+        decide to call a tool instead of responding with text. This test verifies
+        that the agentic loop correctly:
+        1. Detects tool calls (content is None, tool_calls is present)
+        2. Executes the tool via the provided executor
+        3. Re-submits messages with tool results
+        4. Gets the final response from the model
+        """
+        mock_client = MagicMock()
 
-        The fix should detect this case and raise a proper LLMError instead.
+        # First response: model calls the tool
+        mock_response_tool_call = MagicMock()
+        mock_response_tool_call.choices[0].message.content = None
+        mock_response_tool_call.choices[0].message.tool_calls = [
+            MagicMock(
+                id="call_123",
+                function=MagicMock(
+                    name="lookup_documents",
+                    arguments='{"document_names": ["Laws of Game"], "query": "offside rule"}'
+                )
+            )
+        ]
+
+        # Second response: model returns final answer
+        mock_response_final = MagicMock()
+        mock_response_final.choices[0].message.content = "The offside rule states..."
+        mock_response_final.choices[0].message.tool_calls = None
+
+        mock_client.chat.completions.create.side_effect = [
+            mock_response_tool_call,
+            mock_response_final,
+        ]
+
+        with patch("src.core.llm.OpenAI") as mock_openai:
+            mock_openai.return_value = mock_client
+
+            client = LLMClient("test-key", "gpt-4-turbo", 4096)
+            client.client = mock_client
+
+            # Define a tool executor
+            def mock_tool_executor(tool_name: str, **kwargs) -> str:
+                if tool_name == "lookup_documents":
+                    return "Found information about offside in the Laws of Game document"
+                return "Unknown tool"
+
+            response = client.generate_response(
+                "What is offside?",
+                tools=[
+                    {
+                        "type": "function",
+                        "function": {
+                            "name": "lookup_documents",
+                            "description": "Search documents"
+                        }
+                    }
+                ],
+                tool_executor=mock_tool_executor,
+            )
+
+            assert response == "The offside rule states..."
+            # Verify the API was called twice: once for tool call, once for final response
+            assert mock_client.chat.completions.create.call_count == 2
+
+    def test_generate_response_handles_none_content_without_tool_executor(self):
+        """Test that None content without tool executor raises LLMError.
+
+        If the model tries to call a tool but no executor is provided,
+        the code should raise a descriptive LLMError.
         """
         mock_client = MagicMock()
         mock_response = MagicMock()
         # Simulate tool calling response with None content
         mock_response.choices[0].message.content = None
         mock_response.choices[0].message.tool_calls = [
-            {
-                "id": "call_123",
-                "type": "function",
-                "function": {
-                    "name": "lookup_documents",
-                    "arguments": '{"query": "offside"}'
-                }
-            }
+            MagicMock(
+                id="call_123",
+                function=MagicMock(
+                    name="lookup_documents",
+                    arguments='{"query": "offside"}'
+                )
+            )
         ]
 
         with patch("src.core.llm.OpenAI") as mock_openai:
@@ -322,8 +380,8 @@ class TestLLMClient:
             client = LLMClient("test-key", "gpt-4-turbo", 4096)
             client.client = mock_client
 
-            # Should raise LLMError with meaningful message, not AttributeError
-            with pytest.raises(LLMError) as exc_info:
+            # Should raise LLMError when tool executor is not provided
+            with pytest.raises(LLMError):
                 client.generate_response(
                     "What is offside?",
                     tools=[
@@ -334,8 +392,6 @@ class TestLLMClient:
                                 "description": "Search documents"
                             }
                         }
-                    ]
+                    ],
+                    tool_executor=None,  # No executor provided
                 )
-
-            # Verify the error message is informative
-            assert "tool calling" in str(exc_info.value).lower() or "expected" in str(exc_info.value).lower()
