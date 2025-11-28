@@ -286,3 +286,56 @@ class TestLLMClient:
     def test_telegram_message_limit_is_correct(self):
         """Test that Telegram message limit is set correctly."""
         assert TelegramLimits.MAX_MESSAGE_LENGTH == 4096
+
+    def test_generate_response_handles_none_content_from_tool_calling(self):
+        """Test handling of None content when model uses tool calling.
+
+        This is a regression test for the error:
+        'NoneType' object has no attribute 'strip'
+
+        When the OpenAI API is used with function calling tools, the model may
+        decide to call a tool instead of responding with text. In this case,
+        response.choices[0].message.content is None, and calling .strip() on it
+        raises an AttributeError.
+
+        The fix should detect this case and raise a proper LLMError instead.
+        """
+        mock_client = MagicMock()
+        mock_response = MagicMock()
+        # Simulate tool calling response with None content
+        mock_response.choices[0].message.content = None
+        mock_response.choices[0].message.tool_calls = [
+            {
+                "id": "call_123",
+                "type": "function",
+                "function": {
+                    "name": "lookup_documents",
+                    "arguments": '{"query": "offside"}'
+                }
+            }
+        ]
+
+        with patch("src.core.llm.OpenAI") as mock_openai:
+            mock_openai.return_value = mock_client
+            mock_client.chat.completions.create.return_value = mock_response
+
+            client = LLMClient("test-key", "gpt-4-turbo", 4096)
+            client.client = mock_client
+
+            # Should raise LLMError with meaningful message, not AttributeError
+            with pytest.raises(LLMError) as exc_info:
+                client.generate_response(
+                    "What is offside?",
+                    tools=[
+                        {
+                            "type": "function",
+                            "function": {
+                                "name": "lookup_documents",
+                                "description": "Search documents"
+                            }
+                        }
+                    ]
+                )
+
+            # Verify the error message is informative
+            assert "tool calling" in str(exc_info.value).lower() or "expected" in str(exc_info.value).lower()

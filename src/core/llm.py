@@ -227,7 +227,14 @@ class LLMClient:
                     raise
 
             # Extract the response text
-            reply_text = response.choices[0].message.content.strip()
+            # Handle case where model uses tool calling and returns None for content
+            reply_text = response.choices[0].message.content
+            if reply_text is None:
+                # Model decided to call a tool instead of responding directly
+                logger.warning("Model returned tool call instead of text content")
+                raise LLMError("Model attempted to use tool calling when direct response was expected. This may indicate an issue with the tool configuration or model behavior.")
+
+            reply_text = reply_text.strip()
             logger.debug(f"Generated response ({len(reply_text)} chars)")
 
             # Truncate to Telegram message limit

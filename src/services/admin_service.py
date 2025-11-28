@@ -87,13 +87,14 @@ class AdminService:
         text = re.sub(r'(://[\w\-]+:)[\w\-]+(@)', r'\1***REDACTED***\2', text)
         return text
 
-    async def send_error_notification(self, admin_id: int, error_message: str, user_id: int) -> bool:
+    async def send_error_notification(self, admin_id: int, error_message: str, user_id: int, error_stage: str = "unknown") -> bool:
         """Send error notification to admin.
 
         Args:
             admin_id: Telegram user ID of admin
             error_message: Error message to send
             user_id: Telegram user ID of user who caused the error
+            error_stage: Stage where error occurred (e.g., 'llm_generation', 'retrieval', 'database', etc.)
 
         Returns:
             True if message sent successfully, False otherwise
@@ -107,7 +108,7 @@ class AdminService:
             if level not in [MonitoringLevel.ERROR.value, MonitoringLevel.INFO.value, MonitoringLevel.DEBUG.value]:
                 return False
 
-            message = f"⚠️ **Error**\n\nUser ID: `{user_id}`\nError: {self.redact_sensitive_data(error_message)}"
+            message = f"⚠️ **Error**\n\nUser ID: `{user_id}`\nStage: `{error_stage}`\nError: {self.redact_sensitive_data(error_message)}"
             await self.bot.send_message(chat_id=admin_id, text=message, parse_mode="Markdown")
             logger.debug(f"Sent error notification to admin {admin_id}")
             return True

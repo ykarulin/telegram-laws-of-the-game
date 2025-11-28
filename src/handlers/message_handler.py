@@ -180,10 +180,10 @@ class MessageHandler:
             logger.error(f"LLM error for user {message_data.user_id}: {error_msg}")
             await update.message.reply_text(f"Sorry, I encountered an error: {error_msg}")
 
-            # Send error notification to admins
+            # Send error notification to admins with error stage info
             if self.admin_service:
                 asyncio.create_task(
-                    self._notify_admins_error(message_data.user_id, error_msg)
+                    self._notify_admins_error(message_data.user_id, error_msg, error_stage="llm_generation")
                 )
 
         finally:
@@ -532,12 +532,13 @@ class MessageHandler:
             except Exception as e:
                 logger.debug(f"Failed to send info notification to admin {admin_id}: {e}")
 
-    async def _notify_admins_error(self, user_id: int, error_message: str) -> None:
+    async def _notify_admins_error(self, user_id: int, error_message: str, error_stage: str = "unknown") -> None:
         """Send error notification to admins about error.
 
         Args:
             user_id: Telegram user ID who caused the error
             error_message: Error message
+            error_stage: Stage at which error occurred (e.g., 'llm_generation', 'retrieval', etc.)
         """
         if not self.admin_service or not self.admin_service.admin_user_ids:
             return
@@ -547,7 +548,8 @@ class MessageHandler:
                 await self.admin_service.send_error_notification(
                     admin_id,
                     error_message,
-                    user_id
+                    user_id,
+                    error_stage=error_stage
                 )
             except Exception as e:
                 logger.debug(f"Failed to send error notification to admin {admin_id}: {e}")
