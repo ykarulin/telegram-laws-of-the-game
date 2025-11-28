@@ -567,7 +567,7 @@ class RetrievalService:
             filtered_results = filtered_results[:top_k]
 
             logger.info(
-                f"Retrieved {len(filtered_results)} chunks from {len(document_ids)} documents "
+                f"Retrieved {len(filtered_results)} chunks from {len(doc_ids)} documents "
                 f"for query: '{query[:100]}...'"
             )
 
