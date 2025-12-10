@@ -5,7 +5,7 @@ from typing import Optional, List, Dict, Any
 from telegram import Update
 from telegram.ext import ContextTypes
 from src.config import Config
-from src.core.llm import LLMClient, get_system_prompt_with_document_selection
+from src.core.llm import LLMClient, get_system_prompt, get_system_prompt_with_document_selection
 from src.core.db import ConversationDatabase
 from src.core.conversation import build_conversation_context
 from src.core.features import FeatureRegistry
@@ -138,33 +138,65 @@ class MessageHandler:
         # Load conversation history if replying to previous message
         conversation_context = self._load_conversation_context(message_data)
 
-        # Retrieve relevant documents via RAG if enabled
-        # This triggers embedding generation for semantic search
-        retrieved_chunks = self._retrieve_documents(message_data.text)
-        retrieved_context = self.retrieval_service.format_context(retrieved_chunks) if retrieved_chunks else ""
+        # Only do upfront RAG retrieval if document lookup tool is not available
+        # If tools are available, let the LLM decide whether to use lookup_documents
+        retrieved_chunks: List[RetrievedChunk] = []
+        retrieved_context = ""
 
-        # Log the embedding-based retrieval status
-        if retrieved_chunks:
-            logger.info(
-                f"Embeddings used for RAG: {len(retrieved_chunks)} chunks retrieved, "
-                f"will augment LLM context with semantic search results"
-            )
+        if not self.document_lookup_tool:
+            # No tools available - do RAG retrieval upfront
+            logger.debug("Document lookup tool not available, using upfront RAG retrieval")
+            retrieved_chunks = self._retrieve_documents(message_data.text)
+            retrieved_context = self.retrieval_service.format_context(retrieved_chunks) if retrieved_chunks else ""
+
+            # Log the embedding-based retrieval status
+            if retrieved_chunks:
+                logger.info(
+                    f"Embeddings used for RAG: {len(retrieved_chunks)} chunks retrieved, "
+                    f"will augment LLM context with semantic search results"
+                )
+            else:
+                logger.info(
+                    f"No chunks retrieved via embedding-based search, "
+                    f"will use only conversation history (if any) for LLM context"
+                )
         else:
-            logger.info(
-                f"No chunks retrieved via embedding-based search, "
-                f"will use only conversation history (if any) for LLM context"
-            )
+            logger.debug("Document lookup tool available, skipping upfront RAG retrieval - LLM will decide via tools")
 
         # Generate response with typing indicator
         typing_task = asyncio.create_task(send_typing_action_periodically(update, interval=5))
 
         try:
-            bot_response = await self._generate_response(
+            bot_response, tool_was_used = await self._generate_response(
                 message_data.text,
                 conversation_context,
                 retrieved_context,
                 retrieved_chunks
             )
+
+            # If tools are available but weren't used, retry with RAG-augmented context
+            if self.document_lookup_tool and not tool_was_used:
+                logger.info("LLM did not use lookup tool, retrying with RAG-augmented context")
+                # Retrieve documents for fallback RAG
+                fallback_chunks = self._retrieve_documents(message_data.text)
+                fallback_context = self.retrieval_service.format_context(fallback_chunks) if fallback_chunks else ""
+
+                if fallback_chunks:
+                    logger.info(
+                        f"Fallback RAG retrieval: {len(fallback_chunks)} chunks retrieved, "
+                        f"retrying LLM with augmented context (no tools)"
+                    )
+                    # Re-generate response without tools but with RAG context
+                    bot_response = await self._generate_response_without_tools(
+                        message_data.text,
+                        conversation_context,
+                        fallback_context,
+                        fallback_chunks
+                    )
+                    # Use fallback chunks for citations
+                    retrieved_chunks = fallback_chunks
+                else:
+                    logger.info("Fallback RAG retrieval returned no chunks, using initial response")
 
             # Send and persist messages
             await self._send_and_persist(update, message_data, bot_response, retrieved_chunks)
@@ -429,14 +461,42 @@ class MessageHandler:
 
         # Create tool executor function if tools are enabled
         tool_executor = None
+        tool_was_called = {"called": False}  # Track if tools are actually used
+
         if self.document_lookup_tool and tools:
             def tool_executor_wrapper(tool_name: str, **kwargs) -> str:
                 """Execute tool and return formatted result for LLM."""
+                tool_was_called["called"] = True
+                logger.debug(f"🔧 Tool execution initiated: tool_name='{tool_name}'")
+                logger.debug(f"   Tool parameters: {kwargs}")
+
                 if tool_name == "lookup_documents":
                     result = self.document_lookup_tool.execute_lookup(**kwargs)
-                    return self.document_lookup_tool.format_result_for_llm(result)
+
+                    # Log tool outcome
+                    if result.success:
+                        logger.info(
+                            f"✓ Tool '{tool_name}' executed successfully: "
+                            f"documents={result.documents_searched}, "
+                            f"query='{result.query}', "
+                            f"results_count={len(result.results)}"
+                        )
+                        if result.results:
+                            scores = [f"{chunk.score:.4f}" for chunk in result.results]
+                            logger.debug(f"   Retrieved chunk similarity scores: {scores}")
+                    else:
+                        logger.warning(
+                            f"✗ Tool '{tool_name}' execution failed: "
+                            f"error='{result.error_message}'"
+                        )
+
+                    formatted_result = self.document_lookup_tool.format_result_for_llm(result)
+                    logger.debug(f"   Formatted result length: {len(formatted_result)} chars")
+                    return formatted_result
                 else:
-                    return f"Unknown tool: {tool_name}"
+                    error_msg = f"Unknown tool: {tool_name}"
+                    logger.error(f"✗ Unknown tool called: '{tool_name}'")
+                    return error_msg
             tool_executor = tool_executor_wrapper
 
         # Run LLM call in executor to keep event loop non-blocking
@@ -449,6 +509,72 @@ class MessageHandler:
             system_prompt,
             tools,
             tool_executor,
+        )
+        debug_log_llm_response(logger, len(bot_response))
+
+        # Append source citations if documents were retrieved
+        if retrieved_chunks:
+            bot_response = self._append_citations(bot_response, retrieved_chunks)
+            logger.debug(f"Appended citations (now {len(bot_response)} chars)")
+
+        return bot_response, tool_was_called["called"]
+
+    async def _generate_response_without_tools(
+        self,
+        user_text: str,
+        conversation_context: Optional[List[Dict[str, str]]],
+        retrieved_context: str,
+        retrieved_chunks: List[RetrievedChunk]
+    ) -> str:
+        """Generate LLM response with RAG context but without tools (fallback mode).
+
+        This is used when the LLM didn't use the lookup_documents tool, so we retry
+        with augmented RAG context and no tools to ensure better document coverage.
+
+        Args:
+            user_text: The user's input message
+            conversation_context: Previous messages in conversation chain
+            retrieved_context: Formatted document context from RAG retrieval
+            retrieved_chunks: Raw retrieved chunks for citation
+
+        Returns:
+            Generated response text (possibly with citations appended)
+        """
+        # Use standard system prompt without tools
+        system_prompt = get_system_prompt()
+
+        # Prepare augmented context combining conversation history and documents
+        augmented_context: Optional[List[Dict[str, str]]] = None
+        if conversation_context or retrieved_context:
+            augmented_context = []
+            if retrieved_context:
+                augmented_context.append({
+                    "role": "system",
+                    "content": f"DOCUMENT CONTEXT:\n{retrieved_context}"
+                })
+            if conversation_context:
+                augmented_context.extend(conversation_context)
+            logger.debug(f"Augmented context with {len(augmented_context)} items (fallback RAG)")
+
+        # Log what's being sent to LLM
+        debug_log_llm_context(
+            logger,
+            user_text,
+            retrieved_context if retrieved_context else None,
+            len(retrieved_chunks),
+            len(conversation_context) if conversation_context else 0,
+        )
+
+        # Run LLM call without tools in executor to keep event loop non-blocking
+        loop = asyncio.get_event_loop()
+        bot_response = await loop.run_in_executor(
+            None,
+            self.llm_client.generate_response,
+            user_text,
+            augmented_context,
+            system_prompt,
+            None,  # No tools in fallback mode
+            None,  # No tool executor in fallback mode
         )
         debug_log_llm_response(logger, len(bot_response))
 

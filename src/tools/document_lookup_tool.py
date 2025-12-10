@@ -179,8 +179,9 @@ class DocumentLookupTool:
             >>> else:
             ...     print(f"Error: {result.error_message}")
         """
-        logger.info(
-            f"Executing document lookup: documents={document_names}, query='{query[:100]}...', "
+        logger.debug(
+            f"🔍 Document lookup starting: "
+            f"documents={document_names}, query='{query[:100]}...', "
             f"top_k={top_k}, min_similarity={min_similarity}"
         )
 
@@ -188,12 +189,17 @@ class DocumentLookupTool:
         top_k = top_k or 3
         min_similarity = min_similarity or self.config.similarity_threshold
 
+        logger.debug(
+            f"   Parameters after defaults: "
+            f"top_k={top_k}, min_similarity={min_similarity}"
+        )
+
         # Validate parameters
         validation_error = self._validate_parameters(
             document_names, query, top_k, min_similarity
         )
         if validation_error:
-            logger.warning(f"Parameter validation failed: {validation_error}")
+            logger.warning(f"✗ Parameter validation failed: {validation_error}")
             return ToolResult(
                 success=False,
                 documents_searched=document_names,
@@ -203,6 +209,8 @@ class DocumentLookupTool:
             )
 
         try:
+            logger.debug(f"   Retrieving chunks from documents...")
+
             # Retrieve chunks from the specified documents
             results = self.retrieval_service.retrieve_from_documents(
                 query=query,
@@ -211,31 +219,39 @@ class DocumentLookupTool:
                 threshold=min_similarity,
             )
 
-            # Log the tool call details for monitoring
-            logger.info(
-                f"Model tool call - lookup_documents: "
-                f"documents=[{', '.join(document_names)}], "
-                f"query='{query}', "
-                f"top_k={top_k}, "
-                f"min_similarity={min_similarity}"
-            )
-
             # Log chunk scores if available
             if results:
                 try:
                     chunk_scores = [f'{chunk.score:.4f}' for chunk in results]
                     logger.info(
-                        f"Document lookup successful: retrieved {len(results)} chunks from {len(document_names)} documents. "
-                        f"Chunk scores: {chunk_scores}"
+                        f"✓ Document lookup succeeded: "
+                        f"documents=[{', '.join(document_names)}], "
+                        f"query='{query}', "
+                        f"retrieved={len(results)} chunks, "
+                        f"scores={chunk_scores}"
+                    )
+                    logger.debug(
+                        f"   Chunk details:\n" +
+                        "\n".join([
+                            f"     - Chunk {i+1}: score={chunk.score:.4f}, "
+                            f"doc={chunk.metadata.get('document') if chunk.metadata else 'N/A'}"
+                            for i, chunk in enumerate(results)
+                        ])
                     )
                 except (AttributeError, TypeError):
                     # Fallback if chunks don't have score attribute
                     logger.info(
-                        f"Document lookup successful: retrieved {len(results)} chunks from {len(document_names)} documents"
+                        f"✓ Document lookup succeeded: "
+                        f"documents=[{', '.join(document_names)}], "
+                        f"query='{query}', "
+                        f"retrieved={len(results)} chunks"
                     )
             else:
                 logger.info(
-                    f"Document lookup completed: no chunks retrieved from {len(document_names)} documents"
+                    f"⊘ Document lookup completed (no results): "
+                    f"documents=[{', '.join(document_names)}], "
+                    f"query='{query}', "
+                    f"threshold={min_similarity}"
                 )
 
             return ToolResult(
@@ -249,10 +265,10 @@ class DocumentLookupTool:
         except Exception as e:
             error_msg = f"Lookup failed: {str(e)}"
             logger.error(
-                f"Model tool call failed - lookup_documents: "
+                f"✗ Document lookup failed: "
                 f"documents=[{', '.join(document_names)}], "
                 f"query='{query}', "
-                f"error={error_msg}",
+                f"error='{error_msg}'",
                 exc_info=True
             )
             return ToolResult(

@@ -194,9 +194,9 @@ def load_config(env_file: str = None) -> Config:
         env_specific_file = f".env.{env_name}"
 
         if os.path.exists(env_specific_file):
-            load_dotenv(env_specific_file)
-        else:
-            # Fallback to generic .env
-            load_dotenv(".env")
+            load_dotenv(env_specific_file, override=True)
+        elif os.path.exists(".env"):
+            # Fallback to generic .env only if environment-specific doesn't exist
+            load_dotenv(".env", override=True)
 
     return Config.from_env()
